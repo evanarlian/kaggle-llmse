@@ -1,4 +1,5 @@
 import pandas as pd
+from IPython.display import display
 
 
 def wider(df: pd.DataFrame):
