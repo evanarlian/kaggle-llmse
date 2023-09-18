@@ -128,7 +128,7 @@ def main():
     loader = ds.create_dataloader(batch_size=64, num_workers=2)
 
     train_df["science_prob"] = get_science_probs(model, loader, device=device)
-    train_df["is_science"] = train_df["science_probs"] > 0.95
+    train_df["is_science"] = train_df["science_prob"] > 0.95
 
     # sns.histplot(train_df, x="science_prob", bins=100)
     # plt.title("Science probability from 60k rows")
