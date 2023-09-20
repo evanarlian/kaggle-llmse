@@ -140,7 +140,7 @@ def main():
     save_path = Path("input/llmse-science-or-not")
     save_path.mkdir(parents=True, exist_ok=True)
     train_df.loc[train_df["source"].isin([6, 10, 11, 12]), "is_science"] = True
-    train_df.to_csv(save_path / "train.csv")
+    train_df.to_csv(save_path / "train.csv", index=False)
 
     # sns.countplot(train_df, x="source", hue="is_science")
     # plt.title("Science amount from different sources (after manual fix)")
