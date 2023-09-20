@@ -2,19 +2,22 @@
 # file do:
 # 1. Load @nbroad wiki STEM and @mbanaei wiki STEM by Cohere, then merge
 # 2. Clean unused paragraphs ("See also", "References", etc)
-# 3. Create embedding by using title injection trick, hopefully better retrieval
-# 4. Make faiss index, idk what index is the most suitable
+# 3. Create 2 embeddings by using title injection trick, and not
+# 4. Make flat faiss index (for both embeddings) since we want perfect recall
+# 5. Save the model that creates the embeddings
 
 
-import gc
 import re
 from pathlib import Path
 
 import faiss
 import numpy as np
+import torch
 from datasets import Dataset, concatenate_datasets, load_dataset, load_from_disk
 from sentence_transformers import SentenceTransformer
 from tqdm.auto import tqdm
+
+from utils import clean_memory
 
 
 def clean(text: str) -> str:
@@ -64,6 +67,39 @@ def load_wiki_cohere() -> Dataset:
     return ds
 
 
+@torch.no_grad()
+def create_faiss(model: SentenceTransformer, ds: Dataset, title_trick: bool) -> None:
+    # manual embeddings creation to bypass sbert's sorting and to utilize hf dataset
+    # caching and mmap. Modified from: SentenceTransformers' encode method
+    # fmt: off
+    if title_trick:
+        def _trick(row):
+            if row["title"].lower() in row["text"].lower():
+                return {"pars": row["text"]}
+            else:
+                return {"pars": f"{row['title']}. {row['text']}"}
+        paragraphs = ds.map(_trick, remove_columns=["title", "text"])
+    else:
+        def _notrick(row):
+            return {"pars": row["text"]}
+        paragraphs = ds.map(_notrick, remove_columns=["title", "text"])
+    # fmt: on
+    all_embeddings = []
+    for batch in tqdm(paragraphs.iter(batch_size=128), desc="Embed"):
+        pars = batch["pars"]
+        features = model.tokenize(pars)
+        features = {k: v.cuda() for k, v in features.items()}
+        out_features = model.forward(features)
+        embeddings = out_features["sentence_embedding"]
+        all_embeddings.append(embeddings.cpu())
+    all_embeddings = torch.cat(all_embeddings, dim=0).numpy()
+    # no need to normalize embeddings since we want to use IndexFlatIP (dot prod)
+    index = faiss.IndexFlatIP(all_embeddings.shape[1])
+    index.add(all_embeddings)
+    savepath = f"input/llmse-paragraph-level-emb-faiss/wiki_{'trick' if title_trick else 'notrick'}.index"
+    faiss.write_index(index, savepath)
+
+
 def main():
     ds_stem = load_wiki_stem()
     ds_cohe = load_wiki_cohere()
@@ -79,56 +115,21 @@ def main():
     ds_combined.save_to_disk(
         "input/llmse-paragraph-level-emb-faiss/wiki_stem_paragraph"
     )
+    ds_combined = load_from_disk(
+        "input/llmse-paragraph-level-emb-faiss/wiki_stem_paragraph"
+    )  # force mmap?
 
-    # # nb
-    # del ds_stem, ds_cohe, stem_titles, cohe_titles, intersection
-    # gc.collect()
+    del ds_stem, ds_cohe, stem_titles, cohe_titles, intersection, stem_only
+    clean_memory()
 
     # hparams
     SBERT_MODEL = "all-MiniLM-L6-v2"
-    TITLE_TRICK = True
-    FAISS_INDEX = "Flat"  # NOTE we cannot tolerate < 100% recall
-
-    # create embeddings but use title trick, we just check if the title is present
-    # in the text body or not, if not then append to the front
-    if TITLE_TRICK:
-        paragraphs = []
-        for row in tqdm(ds_combined, desc="Title trick"):
-            if row["title"].lower() in row["text"].lower():
-                paragraphs.append(row["text"])
-            else:
-                paragraphs.append(f"{row['title']}. {row['text']}")
-    else:
-        paragraphs = ds_combined["text"]
-
-    # # nb
-    # del ds_combined
-    # gc.collect()
-
-    model = SentenceTransformer(SBERT_MODEL)
-    embs = model.encode(
-        sentences=paragraphs,
-        batch_size=128,
-        show_progress_bar=True,
-        device="cuda",
-    )
-
-    # # nb
-    # del model, paragraphs
-    # gc.collect()
-
-    # just so that we don't repeat this ever again
-    with open("input/llmse-paragraph-level-emb-faiss/embs.npy", "wb") as f:
-        np.save(f, embs)
-        print("Save npy complete")
-
-    # make faiss
-    index = faiss.index_factory(embs.shape[1], FAISS_INDEX)
-    index.train(embs)
-    index.add(embs)
-    faiss.write_index(
-        index, "input/llmse-paragraph-level-emb-faiss/wiki_stem_faiss.index"
-    )
+    model = SentenceTransformer(SBERT_MODEL).cuda().eval()
+    create_faiss(model, ds_combined, title_trick=False)
+    clean_memory()
+    create_faiss(model, ds_combined, title_trick=True)
+    clean_memory()
+    model.save(f"input/llmse-paragraph-level-emb-faiss/{SBERT_MODEL}")
 
 
 if __name__ == "__main__":
