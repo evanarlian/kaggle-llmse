@@ -4,6 +4,7 @@
 # 2.
 
 # TODO rename kaggle too
+import os
 import time
 from dataclasses import dataclass
 
@@ -84,6 +85,8 @@ def make_answer(logits: np.ndarray) -> list[str]:
     return [" ".join(row) for row in top3_choices]
 
 
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
 # extra hparams not in training arguments
 cfg = {
     "freeze_layers": 22,
@@ -92,11 +95,11 @@ cfg = {
     "lora_r": 8,
     "lora_alpha": 16,
     "lora_dropout": 0.1,
-    "science_only": False,
+    "science_only": True,
     "title_trick": False,
     "answer_trick": "no",  # {"no", "standard", "shorten"}
     "k_neighbours": 4,
-    "pretrained": "microsoft/deberta-v3-large",
+    "pretrained": "microsoft/deberta-v3-base",
 }
 assert cfg["answer_trick"] in {"no"}  # for now, just "no" for simplicity
 if cfg["use_lora"]:
@@ -123,7 +126,7 @@ searcher = Searcher(index_gpu, wiki, bi_encoder)
 
 # load all train val test
 train_df = pd.read_csv("input/llmse-science-or-not/train.csv")
-train_df = train_df.loc[:300]  # HACK
+train_df = train_df.loc[:4200]  # HACK for science, for all just set 300
 if cfg["science_only"]:
     print("Filtering out non-science articles")
     train_df = train_df[train_df["is_science"]].reset_index(drop=True)
@@ -153,7 +156,6 @@ test_ds = test_ds.add_column(
     "context", searcher.search_only(test_ds["prompt"], k=cfg["k_neighbours"])
 )
 
-
 del searcher, bi_encoder, index_gpu, res, index, wiki
 clean_memory()
 
@@ -166,6 +168,7 @@ unused = ["prompt", "A", "B", "C", "D", "E", "answer", "context"]
 train_ds = train_ds.map(lambda row: pretokenize(row, tokenizer), remove_columns=unused)
 val_ds = val_ds.map(lambda row: pretokenize(row, tokenizer), remove_columns=unused)
 test_ds = test_ds.map(lambda row: pretokenize(row, tokenizer), remove_columns=unused)
+print(train_ds)
 
 
 # load the main model
@@ -212,17 +215,18 @@ training_args = TrainingArguments(
     evaluation_strategy="steps",
     eval_steps=200,
     logging_strategy="steps",
-    logging_steps=50,
+    logging_steps=200,
     save_strategy="epoch",
     save_steps=200,
     report_to=["wandb"],
     load_best_model_at_end=False,
     # training
+    remove_unused_columns=False,  # Hmm how can `token_type_ids` be removed?
     fp16=True,
     dataloader_num_workers=1,
     num_train_epochs=0.1,
     per_device_train_batch_size=1,
-    per_device_eval_batch_size=2,
+    per_device_eval_batch_size=1,
     gradient_accumulation_steps=8,
     label_smoothing_factor=0.0,
     dataloader_pin_memory=True,
