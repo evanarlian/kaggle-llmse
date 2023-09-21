@@ -1,6 +1,7 @@
 input/
 output/
 wandb/
+checkpoints/
 *.index
 
 # Byte-compiled / optimized / DLL files
