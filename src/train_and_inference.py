@@ -124,13 +124,13 @@ def main(cfg: Namespace):
     train_ds = Dataset.from_pandas(train_df)
     val_ds = Dataset.from_pandas(val_df)
     test_ds = Dataset.from_pandas(test_df)
-    # save to disk so that future map operations are cached
-    train_ds.save_to_disk("input/llmse-train-and-inference/train_ds")
-    val_ds.save_to_disk("input/llmse-train-and-inference/val_ds")
-    test_ds.save_to_disk("input/llmse-train-and-inference/test_ds")
-    train_ds = load_from_disk("input/llmse-train-and-inference/train_ds")
-    val_ds = load_from_disk("input/llmse-train-and-inference/val_ds")
-    test_ds = load_from_disk("input/llmse-train-and-inference/test_ds")
+    # # save to disk so that future map operations are cached
+    # train_ds.save_to_disk("input/llmse-train-and-inference/train_ds")
+    # val_ds.save_to_disk("input/llmse-train-and-inference/val_ds")
+    # test_ds.save_to_disk("input/llmse-train-and-inference/test_ds")
+    # train_ds = load_from_disk("input/llmse-train-and-inference/train_ds")
+    # val_ds = load_from_disk("input/llmse-train-and-inference/val_ds")
+    # test_ds = load_from_disk("input/llmse-train-and-inference/test_ds")
 
     del train_df, val_df, test_df
     clean_memory()
@@ -138,22 +138,22 @@ def main(cfg: Namespace):
     # adding new contexts
     print("Adding new contexts to train val test")
     train_ds = train_ds.add_column(
-        "context", searcher.search_only(train_ds["prompt"], k=cfg.k_neighbours)
+        "context", searcher.search_only(train_ds["prompt"], k=cfg.knn)
     )
     val_ds = val_ds.add_column(
-        "context", searcher.search_only(val_ds["prompt"], k=cfg.k_neighbours)
+        "context", searcher.search_only(val_ds["prompt"], k=cfg.knn)
     )
     test_ds = test_ds.add_column(
-        "context", searcher.search_only(test_ds["prompt"], k=cfg.k_neighbours)
+        "context", searcher.search_only(test_ds["prompt"], k=cfg.knn)
     )
 
     del searcher, bi_encoder, index_gpu, res, index, wiki
     clean_memory()
 
     # pretokenize train val test
-    print(f"Pretokenize using max length {cfg.max_length}")
+    print(f"Pretokenize using max length {cfg.max_tokens}")
     tokenizer = AutoTokenizer.from_pretrained(
-        cfg.pretrained, model_max_length=cfg.max_length
+        cfg.pretrained, model_max_length=cfg.max_tokens
     )
     unused = ["prompt", "A", "B", "C", "D", "E", "answer", "context"]
     train_ds = train_ds.map(
@@ -195,6 +195,7 @@ def main(cfg: Namespace):
 
     # train model
     wandb.init(
+        mode="disabled" if cfg.quick_run else "online",
         project="kaggle-llmse",
         notes="",
         tags=[],
@@ -218,8 +219,8 @@ def main(cfg: Namespace):
         fp16=True,
         dataloader_num_workers=1,
         num_train_epochs=1,
-        per_device_eval_batch_size=4,
         per_device_train_batch_size=4,
+        per_device_eval_batch_size=4,
         gradient_accumulation_steps=8,
         label_smoothing_factor=0.0,
         dataloader_pin_memory=True,
@@ -254,17 +255,18 @@ def main(cfg: Namespace):
 
 if __name__ == "__main__":
     parser = ArgumentParser()
+    parser.add_argument("--pretrained", type=str, required=True)
     parser.add_argument("--freeze_layers", type=int)
-    parser.add_argument("--max_length", type=int, required=True)
+    parser.add_argument("--max_tokens", type=int, required=True)
+    parser.add_argument("--knn", type=int, required=True)
+    parser.add_argument("--answer_trick", type=str, choices=["no"], default="no")
     parser.add_argument("--use_lora", action="store_true")
-    parser.add_argument("--lora_r", type=int)
-    parser.add_argument("--lora_alpha", type=int)
-    parser.add_argument("--lora_dropout", type=float)
+    parser.add_argument("--lora_r", type=int, default=8)
+    parser.add_argument("--lora_alpha", type=int, default=16)
+    parser.add_argument("--lora_dropout", type=float, default=0.1)
+    # only allow "no" for answer_trick (for now)
     parser.add_argument("--science_only", action="store_true")
     parser.add_argument("--title_trick", action="store_true")
-    # only allow "no" for answer_trick (for now)
-    parser.add_argument("--answer_trick", type=str, choices=["no"], required=True)
-    parser.add_argument("--pretrained", type=str, required=True)
     parser.add_argument("--quick_run", action="store_true")
     cfg = parser.parse_args()
     if cfg.use_lora:
