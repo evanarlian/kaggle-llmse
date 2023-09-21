@@ -30,6 +30,16 @@ def clean_memory():
     # torch.cuda.empty_cache()
 
 
+def map_at_3(logits: np.ndarray, labels: np.ndarray) -> float:
+    preds = logits.argsort(-1)[:, ::-1]
+    maps = (
+        (preds[:, 0] == labels) / 1
+        + (preds[:, 1] == labels) / 2
+        + (preds[:, 2] == labels) / 3
+    )
+    return maps.mean()
+
+
 class Searcher:
     def __init__(self, index: Index, wiki: Dataset, bi_encoder: SentenceTransformer):
         self.index = index
@@ -109,6 +119,7 @@ class Searcher:
 
 
 def main():
+    # TODO WIP WIP this shit is so bad rn
     searcher = Searcher(None, None, None)
     questions = ["what is red?", "is water wet?"]
     answers = {
