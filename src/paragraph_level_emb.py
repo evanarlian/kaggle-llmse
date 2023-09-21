@@ -84,21 +84,16 @@ def create_faiss(model: SentenceTransformer, ds: Dataset, title_trick: bool) -> 
             return {"pars": row["text"]}
         paragraphs = ds.map(_notrick, remove_columns=["title", "text"])
     # fmt: on
-    d = 384
     # np concat consumes huge memory so we can't do that
-    all_embeddings = np.ones((len(paragraphs), d), dtype=np.float32)
-    count = 0
+    index = faiss.IndexFlatIP(384)
     for batch in tqdm(paragraphs.iter(batch_size=128), desc="Embed"):
         pars = batch["pars"]
         features = model.tokenize(pars)
         features = {k: v.cuda() for k, v in features.items()}
         out_features = model.forward(features)
         embeddings = out_features["sentence_embedding"]
-        all_embeddings[count : count + len(pars)] = embeddings.cpu().numpy()
-        count += len(pars)
-    # no need to normalize embeddings since we want to use IndexFlatIP (dot prod)
-    index = faiss.IndexFlatIP(d)
-    index.add(all_embeddings)
+        # no need to normalize embeddings since we want to use IndexFlatIP (dot prod)
+        index.add(embeddings.cpu().numpy())
     savepath = f"input/llmse-paragraph-level-emb-faiss/wiki_{'trick' if title_trick else 'notrick'}.index"
     faiss.write_index(index, savepath)
 
@@ -121,7 +116,7 @@ def main():
     ds_combined = load_from_disk(
         "input/llmse-paragraph-level-emb-faiss/wiki_stem_paragraph"
     )  # force mmap?
-
+    # ds_combined = ds_combined.select(list(range(1000)))  # quick check
     del ds_stem, ds_cohe, stem_titles, cohe_titles, intersection, stem_only
     clean_memory()
 
