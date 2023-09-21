@@ -51,7 +51,6 @@ class Searcher:
         n_prefix = 0
         for elems in zip(*splitted):  # transpose
             if len(set(elems)) == 1:
-                print(set(elems))
                 n_prefix += 1
             else:
                 break
@@ -65,6 +64,19 @@ class Searcher:
         # len(s) - n_suffix is used instead of [:-n_suffix]
         # because [:] is not the same as [:-0]
         return [" ".join(s[n_prefix : len(s) - n_suffix]) for s in splitted]
+
+    def get_paragraphs(self, arr: np.ndarray) -> list[str]:
+        # arr shape is (n_quest, neighbour)
+        paragraphs = []
+        for row in arr:
+            combined = " ".join(self.wiki[row]["text"])
+            paragraphs.append(combined)
+        return paragraphs
+
+    def search_only(self, questions: list[str], k: int) -> list[str]:
+        emb = self.bi_encoder.encode(questions, show_progress_bar=False, device="cuda")
+        D, I = self.index.search(emb, k=k)  # (n_question, k)
+        return self.get_paragraphs(I)
 
     def search_include_answer(
         self,
@@ -84,57 +96,58 @@ class Searcher:
             if shorten_answer:
                 A, B, C, D, E = self.remove_common_suffix_prefix([A, B, C, D, E])
             combined += [f"{ques} {ans}" for ans in [A, B, C, D, E]]
-        print(combined)  # (5*quest)
-        D, I = self.search_only(combined, k=k)
-        print(D, I, sep="\n")
+        emb = self.bi_encoder.encode(combined, show_progress_bar=False, device="cuda")
+        D, I = self.index.search(emb, k=k)  # (n_question, k)
         D = D.reshape(D.shape[0] // 5, -1)
         I = I.reshape(I.shape[0] // 5, -1)
         D_rank = D.argsort(-1)  # NOTE: assume smaller distance is better (L2 index)
         first_dim_idx = np.arange(len(D))[:, None]
         D = D[first_dim_idx, D_rank]
         I = I[first_dim_idx, D_rank]
-        print(D, I, sep="\n")
         # get top-k from every row, i don't know the vectorized way of doing this
         topks = []
         for ii in I:
             topk = list(dict.fromkeys(ii))[:k]
             topks.append(topk)
         topks = np.stack(topks, axis=0)
-        print(topks)
-
-    def search_only(self, questions: list[str], k: int) -> list[str]:
-        D = np.random.randn(len(questions), k)
-        I = np.random.randint(0, 3, (len(questions), k))
-        return D, I
-        emb = self.bi_encoder.encode(
-            questions, convert_to_tensor=True, show_progress_bar=True
-        )
-        D, I = self.faiss_index.search(emb, k=q)  # (B, q)
-        retrieved = []  # (B,)
-        # TODO use tqdm for batch??
-        for distances, indices in zip(D.tolist(), I.tolist()):
-            paragraphs = "\n".join(self.hf_ds[indices]["text"])
-            retrieved.append(paragraphs)
-        return retrieved
+        return self.get_paragraphs(topks)
 
 
 def main():
-    # TODO WIP WIP this shit is so bad rn
-    searcher = Searcher(None, None, None)
-    questions = ["what is red?", "is water wet?"]
+    import faiss
+    from datasets import load_from_disk
+
+    wiki = load_from_disk("input/llmse-paragraph-level-emb-faiss/wiki_stem_paragraph")
+    index = faiss.read_index("input/llmse-paragraph-level-emb-faiss/wiki_trick.index")
+    res = faiss.StandardGpuResources()
+    index_gpu = faiss.index_cpu_to_gpu(res, 0, index)
+    bi_encoder = SentenceTransformer(
+        "./input/llmse-paragraph-level-emb-faiss/all-MiniLM-L6-v2"
+    )
+    searcher = Searcher(index_gpu, wiki, bi_encoder)
+    questions = ["What is La Nina?", "Who invented radio?"]  # spoiler alert: [B, E]
     answers = {
-        "A": ["a1 hehe", "a2"],
-        "B": ["b1 hehe", "b2"],
-        "C": ["c1 hehe", "c2"],
-        "D": ["d1 hehe", "d2"],
-        "E": ["e1 hehe", "e2"],
+        "A": ["A delicious mexican food", "Alexander Graham Bell"],
+        "B": ["A weather pattern", "Isaac Newton"],
+        "C": ["A wild animal", "Leonhard Euler"],
+        "D": ["A Spanish movie", "J. Robert Oppenheimer"],
+        "E": ["A festival in Chile", "Guglielmo Marconi"],
     }
-    # searcher.search_include_answer(questions, answers, k=2, shorten_answer=False)
-    searcher.search_include_answer(questions, answers, k=2, shorten_answer=True)
+    print("\n🔥SEARCH ONLY ===========================")
+    pars = searcher.search_only(questions, k=3)
+    for par in pars:
+        print("  >>>", par)
+    print("\n🔥INCLUDE ANS, UNSHORTENED ===========================")
+    pars = searcher.search_include_answer(questions, answers, k=4, shorten_answer=False)
+    for par in pars:
+        print("  >>>", par)
+    print("\n🔥INCLUDE ANS, SHORTENED ===========================")
+    pars = searcher.search_include_answer(questions, answers, k=2, shorten_answer=True)
+    for par in pars:
+        print("  >>>", par)
+
+    # we can see that by injecting answer during search, the result will be bad
 
 
 if __name__ == "__main__":
     main()
-
-D = np.random.randn(50, 4)
-I = np.random.randint(0, 100, (50, 4))
