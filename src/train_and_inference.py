@@ -218,10 +218,10 @@ def main(cfg: Namespace):
         remove_unused_columns=False,  # why did hf remove `token_type_ids`?
         fp16=True,
         dataloader_num_workers=1,
-        num_train_epochs=1,
-        per_device_train_batch_size=4,
-        per_device_eval_batch_size=4,
-        gradient_accumulation_steps=8,
+        num_train_epochs=cfg.ep,
+        per_device_train_batch_size=cfg.bs,
+        per_device_eval_batch_size=cfg.bs,
+        gradient_accumulation_steps=cfg.grad_acc,
         label_smoothing_factor=0.0,
         dataloader_pin_memory=True,
         # optimizer
@@ -255,19 +255,25 @@ def main(cfg: Namespace):
 
 if __name__ == "__main__":
     parser = ArgumentParser()
+    # required
     parser.add_argument("--pretrained", type=str, required=True)
-    parser.add_argument("--freeze_layers", type=int)
     parser.add_argument("--max_tokens", type=int, required=True)
     parser.add_argument("--knn", type=int, required=True)
-    parser.add_argument("--answer_trick", type=str, choices=["no"], default="no")
+    parser.add_argument("--ep", type=float, required=True)
+    parser.add_argument("--bs", type=int, required=True)
+    parser.add_argument("--grad_acc", type=int, required=True)
+    # optionals
     parser.add_argument("--use_lora", action="store_true")
     parser.add_argument("--lora_r", type=int, default=8)
     parser.add_argument("--lora_alpha", type=int, default=16)
     parser.add_argument("--lora_dropout", type=float, default=0.1)
-    # only allow "no" for answer_trick (for now)
+    parser.add_argument("--freeze_layers", type=int)
     parser.add_argument("--science_only", action="store_true")
     parser.add_argument("--title_trick", action="store_true")
+    # enable this flag for fast run and disable wandb
     parser.add_argument("--quick_run", action="store_true")
+    # DEPRECATED: only allow "no" for answer_trick
+    parser.add_argument("--answer_trick", type=str, choices=["no"], default="no")
     cfg = parser.parse_args()
     if cfg.use_lora:
         print("LoRA will automatically freeze layers, overriding freeze_layers")
