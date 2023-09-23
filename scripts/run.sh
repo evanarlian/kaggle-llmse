@@ -44,3 +44,6 @@
 # python src/train_and_inference.py --pretrained=microsoft/deberta-v3-base --max_tokens=256 --knn=4 --ep=2 --bs=4 --grad_acc=8 --use_lora --science_only --title_trick
 # python src/train_and_inference.py --pretrained=microsoft/deberta-v3-base --max_tokens=256 --knn=4 --ep=2 --bs=4 --grad_acc=8 --freeze_layers=10 --science_only --title_trick
 
+# # does max token length matter? yse, a bit (wandb 22-23)
+# python src/train_and_inference.py --pretrained=microsoft/deberta-v3-base --max_tokens=512 --knn=8 --ep=1 --bs=2 --grad_acc=16 --freeze_layers=10 --title_trick
+# python src/train_and_inference.py --pretrained=microsoft/deberta-v3-base --max_tokens=512 --knn=8 --ep=2 --bs=2 --grad_acc=16 --freeze_layers=10 --science_only --title_trick
