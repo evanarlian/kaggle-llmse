@@ -1,5 +1,4 @@
-# This file is used to reduce the actual runtime in the training notebook, we precompute
-# train and val dataset here
+# This is the training and inference file
 # 1. Find the most relevant passage for all row in all dataset
 # 2. Precompute all tokenization
 # 3. Train and evaluate
@@ -195,7 +194,7 @@ def main(cfg: Namespace):
 
     # train model
     wandb.init(
-        mode="disabled" if cfg.quick_run else "online",
+        mode="disabled" if cfg.quick_run else None,
         project="kaggle-llmse",
         notes="",
         tags=[],
