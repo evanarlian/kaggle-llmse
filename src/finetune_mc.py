@@ -1,4 +1,4 @@
-# This is the training and inference file
+# This is multiple choice training and inference
 # 1. Find the most relevant passage for all row in all dataset
 # 2. Precompute all tokenization
 # 3. Train and evaluate
