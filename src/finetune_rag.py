@@ -121,12 +121,11 @@ def main(cfg: Namespace):
 
     # load all train val test
     train_df = pd.read_csv("input/llmse-science-or-not/train.csv")
-    if cfg.quick_run:
-        limit = 5000 if cfg.science_only else 300  # science is rarer
-        train_df = train_df.iloc[:limit]
     if cfg.science_only:
         print("Filtering out non-science articles")
         train_df = train_df[train_df["is_science"]].reset_index(drop=True)
+    if cfg.quick_run:
+        train_df = train_df.iloc[:300]
     train_df = train_df.drop(
         columns=["context", "source", "science_prob", "is_science"]
     )
@@ -162,8 +161,10 @@ def main(cfg: Namespace):
     del searcher, bi_encoder, index_gpu, res, index, wiki
     clean_memory()
 
-    # we don't pretokenize nor remove anything from val and test because we want to
-    # compare loss, val and test are different from train
+    # train: pretokenize, remove cols
+    # val: keep cols (this is for map@3)
+    # val ds loss: pretokenize, remove cols (this is for loss)
+    # test: keep cols
     print(f"Pretokenize train_ds only using max length {cfg.max_tokens}")
     tokenizer = AutoTokenizer.from_pretrained(
         cfg.pretrained, model_max_length=cfg.max_tokens
@@ -174,10 +175,11 @@ def main(cfg: Namespace):
     train_ds = train_ds.map(
         lambda row: pretokenize(row, tokenizer), remove_columns=unused
     )
-    print(train_ds)
+    val_ds_loss = val_ds.map(
+        lambda row: pretokenize(row, tokenizer), remove_columns=unused
+    )
 
     # load the main model
-    # TODO below this is only optimized for phi 1.5, not for galactica
     model = AutoModelForCausalLM.from_pretrained(
         cfg.pretrained, trust_remote_code=True, torch_dtype="auto"
     )
@@ -195,7 +197,6 @@ def main(cfg: Namespace):
     if cfg.use_lora:
         print("Using LoRA")
         peft_config = LoraConfig(
-            task_type=TaskType.SEQ_CLS,
             r=cfg.lora_r,
             lora_alpha=cfg.lora_alpha,
             lora_dropout=cfg.lora_dropout,
@@ -220,15 +221,15 @@ def main(cfg: Namespace):
         output_dir="input/llmse-finetune-rag/checkpoints",
         overwrite_output_dir=True,
         evaluation_strategy="steps",
-        eval_steps=200,
+        eval_steps=100,
         logging_strategy="steps",
-        logging_steps=200,
+        logging_steps=100,
         save_strategy="epoch",
-        save_steps=200,
+        save_steps=100,
         report_to=["wandb"],
         load_best_model_at_end=False,
         # training
-        remove_unused_columns=False,  # why did hf remove `token_type_ids`?
+        remove_unused_columns=False,
         fp16=True,
         dataloader_num_workers=1,
         num_train_epochs=cfg.ep,
@@ -248,9 +249,9 @@ def main(cfg: Namespace):
         model=model,
         args=training_args,
         train_dataset=train_ds,
+        eval_dataset=val_ds_loss,
         tokenizer=tokenizer,
         data_collator=DataCollatorForLanguageModeling(tokenizer=tokenizer, mlm=False),
-        # compute_metrics=compute_metrics,
     )
 
     trainer.train()
