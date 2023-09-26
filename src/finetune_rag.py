@@ -75,7 +75,7 @@ def manual_eval(
             )
     losses = losses.numpy()
     labels = np.array(
-        {"A": 0, "B": 1, "C": 2, "D": 3, "E": 4}[ans] for ans in ds["answer"]
+        [{"A": 0, "B": 1, "C": 2, "D": 3, "E": 4}[ans] for ans in ds["answer"]]
     )
     return losses, labels
 
@@ -137,12 +137,12 @@ def main(cfg: Namespace):
     val_ds = Dataset.from_pandas(val_df)
     test_ds = Dataset.from_pandas(test_df)
     # # save to disk so that future map operations are cached
-    # train_ds.save_to_disk("input/llmse-train-and-inference/train_ds")
-    # val_ds.save_to_disk("input/llmse-train-and-inference/val_ds")
-    # test_ds.save_to_disk("input/llmse-train-and-inference/test_ds")
-    # train_ds = load_from_disk("input/llmse-train-and-inference/train_ds")
-    # val_ds = load_from_disk("input/llmse-train-and-inference/val_ds")
-    # test_ds = load_from_disk("input/llmse-train-and-inference/test_ds")
+    # train_ds.save_to_disk("input/llmse-finetune-rag/train_ds")
+    # val_ds.save_to_disk("input/llmse-finetune-rag/val_ds")
+    # test_ds.save_to_disk("input/llmse-finetune-rag/test_ds")
+    # train_ds = load_from_disk("input/llmse-finetune-rag/train_ds")
+    # val_ds = load_from_disk("input/llmse-finetune-rag/val_ds")
+    # test_ds = load_from_disk("input/llmse-finetune-rag/test_ds")
 
     del train_df, val_df, test_df
     clean_memory()
@@ -217,7 +217,7 @@ def main(cfg: Namespace):
 
     training_args = TrainingArguments(
         # administration
-        output_dir="input/llmse-train-and-inference/checkpoints",
+        output_dir="input/llmse-finetune-rag/checkpoints",
         overwrite_output_dir=True,
         evaluation_strategy="steps",
         eval_steps=200,
@@ -256,16 +256,17 @@ def main(cfg: Namespace):
     trainer.train()
     # manual evaluation at the very end
     val_losses, val_labels = manual_eval(model, tokenizer, val_ds)
-    wandb.log({"eval/map@3": map_at_3(val_losses, val_labels)})
+    val_map3 = map_at_3(val_losses, val_labels)
+    print(f"eval/map@3 = {val_map3:0.4f}")
+    wandb.log({"eval/map@3": val_map3})
     wandb.finish()  # this is for notebook
 
     # predict and submit
-    # TODO manual prediction at hte end
     test_losses, _ = manual_eval(model, tokenizer, test_ds)
     preds = make_answer(test_losses)
     sub_df = pd.read_csv("input/kaggle-llm-science-exam/sample_submission.csv")
     sub_df["prediction"] = preds
-    sub_df.to_csv("input/llmse-train-and-inference/submission.csv", index=False)
+    sub_df.to_csv("input/llmse-finetune-rag/submission.csv", index=False)
 
 
 if __name__ == "__main__":
