@@ -1,4 +1,4 @@
-# This is the training and inference file
+# This is RAG training and inference
 # 1. Find the most relevant passage for all row in all dataset
 # 2. Precompute all tokenization
 # 3. Train and evaluate
@@ -6,16 +6,18 @@
 
 import os
 from argparse import ArgumentParser, Namespace
-from dataclasses import dataclass
 
 import faiss
 import numpy as np
 import pandas as pd
 import torch
+import torch.nn.functional as F
 import wandb
 from datasets import Dataset, load_from_disk
 from peft import LoraConfig, TaskType, get_peft_model
 from sentence_transformers import SentenceTransformer
+from torch import nn
+from tqdm.auto import tqdm
 from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
@@ -42,12 +44,44 @@ def pretokenize(row: dict, tokenizer: PreTrainedTokenizerBase):
     )
     return encoded
 
-def manual_eval(row):
-    pass  # TODO
+
+@torch.no_grad()
+def manual_eval(
+    model: nn.Module, tokenizer: PreTrainedTokenizerBase, ds: Dataset
+) -> tuple[np.ndarray, np.ndarray]:
+    model.eval()
+    losses = torch.zeros(len(ds), 5)
+    for i, row in tqdm(enumerate(ds), total=len(ds)):
+        # tokenize the same way as the training pretokenization, but in batches of 5
+        context = row["context"]
+        template = "Question: Based on the context above, {}\nAnswer: {}"
+        # my machine cannot handle big batches
+        for j, ans in enumerate("ABCDE"):
+            qa = template.format(row["prompt"], row[ans])
+            encoded = tokenizer(
+                context,
+                qa,
+                truncation="only_first",
+                return_tensors="pt",
+                return_token_type_ids=False,
+            )
+            encoded = {k: v.cuda() for k, v in encoded.items()}
+            # get losses
+            out = model(**encoded)
+            shift_logits = out["logits"][:, :-1]
+            shift_labels = encoded["input_ids"][:, 1:]
+            losses[i, j] = F.cross_entropy(
+                shift_logits.transpose(-2, -1), shift_labels, reduction="mean"
+            )
+    losses = losses.numpy()
+    labels = np.array(
+        {"A": 0, "B": 1, "C": 2, "D": 3, "E": 4}[ans] for ans in ds["answer"]
+    )
+    return losses, labels
 
 
-def map_at_3(logits: np.ndarray, labels: np.ndarray) -> float:
-    preds = logits.argsort(-1)[:, ::-1]
+def map_at_3(losses: np.ndarray, labels: np.ndarray) -> float:
+    preds = losses.argsort(-1)
     maps = (
         (preds[:, 0] == labels) / 1
         + (preds[:, 1] == labels) / 2
@@ -56,13 +90,8 @@ def map_at_3(logits: np.ndarray, labels: np.ndarray) -> float:
     return maps.mean()
 
 
-def compute_metrics(p):
-    map3 = map_at_3(p.predictions, p.label_ids)
-    return {"map@3": map3}
-
-
-def make_answer(logits: np.ndarray) -> list[str]:
-    preds = logits.argsort(-1)[:, ::-1][:, :3]
+def make_answer(losses: np.ndarray) -> list[str]:
+    preds = losses.argsort(-1)[:, :3]
     choices = np.array(["A", "B", "C", "D", "E"])
     top3_choices = choices[preds]
     return [" ".join(row) for row in top3_choices]
@@ -133,23 +162,22 @@ def main(cfg: Namespace):
     del searcher, bi_encoder, index_gpu, res, index, wiki
     clean_memory()
 
-    # pretokenize train val test
-    print(f"Pretokenize using max length {cfg.max_tokens}")
+    # we don't pretokenize nor remove anything from val and test because we want to
+    # compare loss, val and test are different from train
+    print(f"Pretokenize train_ds only using max length {cfg.max_tokens}")
     tokenizer = AutoTokenizer.from_pretrained(
         cfg.pretrained, model_max_length=cfg.max_tokens
     )
     tokenizer.pad_token_id = tokenizer.eos_token_id
+
     unused = ["prompt", "A", "B", "C", "D", "E", "answer", "context"]
     train_ds = train_ds.map(
-        lambda row: pretokenize(row, tokenizer), remove_columns=unused
-    )
-    val_ds = val_ds.map(lambda row: pretokenize(row, tokenizer), remove_columns=unused)
-    test_ds = test_ds.map(
         lambda row: pretokenize(row, tokenizer), remove_columns=unused
     )
     print(train_ds)
 
     # load the main model
+    # TODO below this is only optimized for phi 1.5, not for galactica
     model = AutoModelForCausalLM.from_pretrained(
         cfg.pretrained, trust_remote_code=True, torch_dtype="auto"
     )
@@ -174,7 +202,6 @@ def main(cfg: Namespace):
             bias="none",
             inference_mode=False,
             target_modules=["out_proj"],
-            # modules_to_save=["classifier", "pooler"],
         )
         model = get_peft_model(model, peft_config)
         model.print_trainable_parameters()
@@ -227,14 +254,15 @@ def main(cfg: Namespace):
     )
 
     trainer.train()
-    # TODO manual evaluation at the very end
-    trainer.evaluate()
+    # manual evaluation at the very end
+    val_losses, val_labels = manual_eval(model, tokenizer, val_ds)
+    wandb.log({"eval/map@3": map_at_3(val_losses, val_labels)})
     wandb.finish()  # this is for notebook
 
     # predict and submit
     # TODO manual prediction at hte end
-    output = trainer.predict(test_ds)
-    preds = make_answer(output.predictions)
+    test_losses, _ = manual_eval(model, tokenizer, test_ds)
+    preds = make_answer(test_losses)
     sub_df = pd.read_csv("input/kaggle-llm-science-exam/sample_submission.csv")
     sub_df["prediction"] = preds
     sub_df.to_csv("input/llmse-train-and-inference/submission.csv", index=False)
