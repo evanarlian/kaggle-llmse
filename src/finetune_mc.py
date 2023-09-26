@@ -108,12 +108,11 @@ def main(cfg: Namespace):
 
     # load all train val test
     train_df = pd.read_csv("input/llmse-science-or-not/train.csv")
-    if cfg.quick_run:
-        limit = 5000 if cfg.science_only else 300  # science is rarer
-        train_df = train_df.iloc[:limit]
     if cfg.science_only:
         print("Filtering out non-science articles")
         train_df = train_df[train_df["is_science"]].reset_index(drop=True)
+    if cfg.quick_run:
+        train_df = train_df.iloc[:300]
     train_df = train_df.drop(
         columns=["context", "source", "science_prob", "is_science"]
     )
