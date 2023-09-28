@@ -10,10 +10,16 @@ import seaborn as sns
 import torch
 from datasets import Dataset, concatenate_datasets, load_dataset, load_from_disk
 from IPython import embed
-from sentence_transformers import SentenceTransformer
+from sentence_transformers import CrossEncoder, SentenceTransformer
 from tqdm.auto import tqdm
+from transformers import (
+    AutoModelForSequenceClassification,
+    AutoTokenizer,
+    PreTrainedTokenizerBase,
+)
 
-from utils import clean_memory
+# from searcher import Searcher
+# from utils import clean_memory
 
 # TODO
 # [1]. reconstruct wikipedia from combination of cohere, parsed cohere, and/or nbroad
@@ -86,41 +92,115 @@ def get_abstract(row: dict) -> dict:
 
 
 @torch.no_grad()
-def make_faiss_index_less_mem(model: SentenceTransformer, wiki: Dataset) -> faiss.Index:
-    # manual embeddings creation to bypass sbert's sorting, and to utilize hf dataset
-    # caching and mmap. Modified from: SentenceTransformers' encode method
-    index = faiss.IndexFlatIP(768)
-    for batch in tqdm(wiki.iter(batch_size=128), desc="sbert"):
-        features = model.tokenize(batch["abstract"])
-        features = {k: v.cuda() for k, v in features.items()}
-        out_features = model.forward(features)
-        embeddings = out_features["sentence_embedding"]
-        # no need to normalize embeddings since we want to use IndexFlatIP (dot prod)
-        index.add(embeddings.cpu().numpy())
-    return index
-
-
-@torch.no_grad()
 def make_faiss_index(model: SentenceTransformer, wiki: Dataset) -> faiss.Index:
-    embeddings = model.encode(wiki["abstract"], batch_size=128, show_progress_bar=True)
+    embeddings = model.encode(
+        wiki["abstract"],
+        batch_size=64,
+        show_progress_bar=True,
+        normalize_embeddings=True,
+    )
     index = faiss.IndexFlatIP(embeddings.shape[1])
     index.add(embeddings)
     return index
 
 
+@torch.no_grad()
+def search_and_rerank_context(
+    wiki: Dataset,
+    index: faiss.Index,
+    embedder: SentenceTransformer,
+    ranker: CrossEncoder,
+    ds: Dataset,
+    n_articles: int,
+    k_pars: int,
+    k_sents: int,
+):
+    """
+    Generate context for RAG.
+
+    Args:
+        wiki (Dataset): Knowledge base
+        index (faiss.Index): The index of knowledge base
+        embedder (SentenceTransformer): Bi encoder model
+        ranker (CrossEncoder): Cross encoder model
+        ds (Dataset): Competition dataset
+        n_articles (int): Num wiki articles to fetch
+        k_pars (int): Top k paragraphs from articles after reranking with questions
+        k_sents (int): Top k sentences from articles after matching with answers
+    """
+    embedder.eval()
+    ranker.eval()
+    debug = (
+        {}
+    )  # TODO just make debug_ds to peer through every steps, IT HAS EVERYTHING, retrieved article scores, article position, distances, rerank score
+    q_embs = embedder.encode(ds["prompt"], show_progress_bar=True)
+    D, I = index.search(q_embs, k=n_articles)
+    articles: list[str] = []
+    for indices in I:
+        rows = wiki[indices]
+        articles.append("\n\n".join(rows["article"]))
+    debug["articles"] = articles
+    debug["article_scores"] = D  # distance
+    # break apart to paragraphs for reranking
+    debug["rank_scores"] = []
+    contexts = []
+    for quest, article in tqdm(zip(ds["prompt"], articles), total=len(articles)):
+        paragraphs = article.split("\n\n")
+        pairs = [[quest, par] for par in paragraphs]
+        rank_score = ranker.predict(pairs, show_progress_bar=False, num_workers=1)
+        k_ranked = "\n".join(
+            [paragraphs[i] for i in rank_score.argsort()[::-1][:k_pars]]
+        )
+        contexts.append(k_ranked)
+        debug["rank_scores"].append(rank_score.argsort()[::-1][:k_pars])
+    return contexts, debug
+
+
 # hparams
 ROOT = Path("input/llmse-context-filling/")
-SBERT_MODEL = "BAAI/bge-base-en-v1.5"
+BI_ENCODER = "BAAI/bge-base-en-v1.5"
+CROSS_ENCODER = "BAAI/bge-reranker-base"
 
 # make faiss index for searching relevant wiki articles
-wiki = load_wiki_merged()  # TODO
-wiki = wiki.map(get_abstract)  # TODO
+# wiki = load_wiki_merged()
+# wiki = wiki.map(get_abstract)
 # save and load to trigger caching?
-wiki.save_to_disk(ROOT / "wiki_stem")  # TODO
+# wiki.save_to_disk(ROOT / "wiki_stem")
 wiki = load_from_disk(ROOT / "wiki_stem")
 
 # NOTE repeat this part during testing
-model = SentenceTransformer(SBERT_MODEL).cuda().eval()
-index = make_faiss_index(model, wiki)
-model.save(str(ROOT / SBERT_MODEL))
-faiss.write_index(index, str(ROOT / "wiki_stem.index"))
+embedder = SentenceTransformer(BI_ENCODER)
+# index = make_faiss_index(embedder, wiki)
+# embedder.save(str(ROOT / BI_ENCODER))
+# faiss.write_index(index, str(ROOT / "wiki_stem.index"))
+
+
+#
+index = faiss.read_index(str(ROOT / "wiki_stem.index"))
+res = faiss.StandardGpuResources()
+gpu_index = faiss.index_cpu_to_gpu(res, 0, index)
+
+
+#
+val_df = pd.read_csv("input/kaggle-llm-science-exam/train.csv")
+val_ds = Dataset.from_pandas(val_df).select(range(10))
+
+
+# reranker
+# https://huggingface.co/BAAI/bge-reranker-base#using-huggingface-transformers-1
+ranker_tokenizer = AutoTokenizer.from_pretrained("BAAI/bge-reranker-base")
+ranker = CrossEncoder(CROSS_ENCODER)
+
+contexts, debug = search_and_rerank_context(
+    wiki,
+    index,
+    embedder,
+    ranker,
+    ranker_tokenizer,
+    val_ds,
+    n_articles=5,
+    k_pars=10,
+    k_sents=2,
+)
+val_ds = val_ds.add_column("context", contexts)
+embed()
