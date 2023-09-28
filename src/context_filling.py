@@ -12,13 +12,9 @@ from datasets import Dataset, concatenate_datasets, load_dataset, load_from_disk
 from IPython import embed
 from sentence_transformers import CrossEncoder, SentenceTransformer
 from tqdm.auto import tqdm
-from transformers import (
-    AutoModelForSequenceClassification,
-    AutoTokenizer,
-    PreTrainedTokenizerBase,
-)
 
-# from searcher import Searcher
+from searcher import search_and_rerank_context
+
 # from utils import clean_memory
 
 # TODO
@@ -104,58 +100,6 @@ def make_faiss_index(model: SentenceTransformer, wiki: Dataset) -> faiss.Index:
     return index
 
 
-@torch.no_grad()
-def search_and_rerank_context(
-    wiki: Dataset,
-    index: faiss.Index,
-    embedder: SentenceTransformer,
-    ranker: CrossEncoder,
-    ds: Dataset,
-    n_articles: int,
-    k_pars: int,
-    k_sents: int,
-):
-    """
-    Generate context for RAG.
-
-    Args:
-        wiki (Dataset): Knowledge base
-        index (faiss.Index): The index of knowledge base
-        embedder (SentenceTransformer): Bi encoder model
-        ranker (CrossEncoder): Cross encoder model
-        ds (Dataset): Competition dataset
-        n_articles (int): Num wiki articles to fetch
-        k_pars (int): Top k paragraphs from articles after reranking with questions
-        k_sents (int): Top k sentences from articles after matching with answers
-    """
-    embedder.eval()
-    ranker.eval()
-    debug = (
-        {}
-    )  # TODO just make debug_ds to peer through every steps, IT HAS EVERYTHING, retrieved article scores, article position, distances, rerank score
-    q_embs = embedder.encode(ds["prompt"], show_progress_bar=True)
-    D, I = index.search(q_embs, k=n_articles)
-    articles: list[str] = []
-    for indices in I:
-        rows = wiki[indices]
-        articles.append("\n\n".join(rows["article"]))
-    debug["articles"] = articles
-    debug["article_scores"] = D  # distance
-    # break apart to paragraphs for reranking
-    debug["rank_scores"] = []
-    contexts = []
-    for quest, article in tqdm(zip(ds["prompt"], articles), total=len(articles)):
-        paragraphs = article.split("\n\n")
-        pairs = [[quest, par] for par in paragraphs]
-        rank_score = ranker.predict(pairs, show_progress_bar=False, num_workers=1)
-        k_ranked = "\n".join(
-            [paragraphs[i] for i in rank_score.argsort()[::-1][:k_pars]]
-        )
-        contexts.append(k_ranked)
-        debug["rank_scores"].append(rank_score.argsort()[::-1][:k_pars])
-    return contexts, debug
-
-
 # hparams
 ROOT = Path("input/llmse-context-filling/")
 BI_ENCODER = "BAAI/bge-base-en-v1.5"
@@ -188,7 +132,6 @@ val_ds = Dataset.from_pandas(val_df).select(range(10))
 
 # reranker
 # https://huggingface.co/BAAI/bge-reranker-base#using-huggingface-transformers-1
-ranker_tokenizer = AutoTokenizer.from_pretrained("BAAI/bge-reranker-base")
 ranker = CrossEncoder(CROSS_ENCODER)
 
 contexts, debug = search_and_rerank_context(
@@ -196,7 +139,6 @@ contexts, debug = search_and_rerank_context(
     index,
     embedder,
     ranker,
-    ranker_tokenizer,
     val_ds,
     n_articles=5,
     k_pars=10,

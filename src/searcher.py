@@ -1,7 +1,59 @@
+import faiss
 import numpy as np
+import torch
 from datasets import Dataset
 from faiss import Index
-from sentence_transformers import SentenceTransformer
+from sentence_transformers import CrossEncoder, SentenceTransformer
+from tqdm.auto import tqdm
+
+
+@torch.no_grad()
+def search_and_rerank_context(
+    wiki: Dataset,
+    index: faiss.Index,
+    embedder: SentenceTransformer,
+    ranker: CrossEncoder,
+    ds: Dataset,
+    n_articles: int,
+    k_pars: int,
+    k_sents: int,
+):
+    """
+    Generate context for RAG.
+
+    Args:
+        wiki (Dataset): Knowledge base
+        index (faiss.Index): The index of knowledge base
+        embedder (SentenceTransformer): Bi encoder model
+        ranker (CrossEncoder): Cross encoder model
+        ds (Dataset): Competition dataset
+        n_articles (int): Num wiki articles to fetch
+        k_pars (int): Top k paragraphs from articles after reranking with questions
+        k_sents (int): Top k sentences from articles after matching with answers
+    """
+    debug = {}  #  , distances, rerank score
+    q_embs = embedder.encode(ds["prompt"], show_progress_bar=True)
+    D, I = index.search(q_embs, k=n_articles)
+    debug["retrieved_article_ids"] = I
+    debug["retrieved_article_scores"] = D
+    articles: list[str] = []
+    for indices in I:
+        rows = wiki[indices]
+        articles.append("\n\n".join(rows["article"]))
+    # break apart to paragraphs for reranking
+    debug["ranked_scores"] = []
+    contexts = []
+    for quest, article in tqdm(zip(ds["prompt"], articles), total=len(articles)):
+        paragraphs = article.split("\n\n")
+        pairs = [[quest, par] for par in paragraphs]
+        rank_score = ranker.predict(pairs, show_progress_bar=False)
+        topk = rank_score.argsort()[::-1][:k_pars]
+        ranked_pars = "\n".join([paragraphs[i] for i in topk])
+        contexts.append(ranked_pars)
+        debug["ranked_scores"].append(rank_score[topk])
+    debug["ranked_pars"] = contexts
+    # break apart to sentences for tfidf
+    return contexts, Dataset.from_dict(debug)
 
 
 class Searcher:
