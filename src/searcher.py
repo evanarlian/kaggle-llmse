@@ -1,9 +1,11 @@
+import blingfire as bf
 import faiss
 import numpy as np
 import torch
 from datasets import Dataset
 from faiss import Index
 from sentence_transformers import CrossEncoder, SentenceTransformer
+from sklearn.feature_extraction.text import TfidfVectorizer
 from tqdm.auto import tqdm
 
 
@@ -32,7 +34,9 @@ def search_and_rerank_context(
         k_sents (int): Top k sentences from articles after matching with answers
     """
     debug = {}  #  , distances, rerank score
-    q_embs = embedder.encode(ds["prompt"], show_progress_bar=True)
+    q_embs = embedder.encode(
+        ds["prompt"], show_progress_bar=True, normalize_embeddings=True
+    )
     D, I = index.search(q_embs, k=n_articles)
     debug["retrieved_article_ids"] = I
     debug["retrieved_article_scores"] = D
@@ -40,20 +44,45 @@ def search_and_rerank_context(
     for indices in I:
         rows = wiki[indices]
         articles.append("\n\n".join(rows["article"]))
-    # break apart to paragraphs for reranking
-    debug["ranked_scores"] = []
-    contexts = []
+    # break apart to paragraphs for reranking   TODO this is too slow!
+    debug["ranker_scores"] = []
+    contexts: list[str] = []
     for quest, article in tqdm(zip(ds["prompt"], articles), total=len(articles)):
         paragraphs = article.split("\n\n")
         pairs = [[quest, par] for par in paragraphs]
         rank_score = ranker.predict(pairs, show_progress_bar=False)
         topk = rank_score.argsort()[::-1][:k_pars]
-        ranked_pars = "\n".join([paragraphs[i] for i in topk])
-        contexts.append(ranked_pars)
-        debug["ranked_scores"].append(rank_score[topk])
-    debug["ranked_pars"] = contexts
+        ranker_pars = "\n".join([paragraphs[i] for i in topk])
+        contexts.append(ranker_pars)
+        debug["ranker_scores"].append(rank_score[topk])
+    debug["ranker_pars"] = [c.split("\n") for c in contexts]
+    # break apart to paragraphs for searching
+    debug["embedder_scores"] = []
+    contexts2: list[str] = []
+    for q_emb, article in tqdm(zip(q_embs, articles), total=len(articles)):
+        paragraphs = article.split("\n\n")
+        par_embs = embedder.encode(paragraphs)
+        embedder_score = q_emb @ par_embs.T
+        topk = embedder_score.argsort()[::-1][:k_pars]
+        embedder_pars = "\n".join([paragraphs[i] for i in topk])
+        contexts2.append(embedder_pars)
+        debug["embedder_scores"].append(embedder_score[topk])
+    debug["embedder_pars"] = [c.split("\n") for c in contexts2]
     # break apart to sentences for tfidf
-    return contexts, Dataset.from_dict(debug)
+    debug["tfidf_sentences"] = []
+    debug["tfidf_scores"] = []
+    for i, (row, article) in tqdm(enumerate(zip(ds, articles)), total=len(articles)):
+        sentences = bf.text_to_sentences(article).split("\n")
+        tfidf = TfidfVectorizer()
+        X = tfidf.fit_transform(sentences)
+        Y = tfidf.transform([row[ans] for ans in "ABCDE"])
+        similarity = (Y @ X.T).toarray()
+        # just select one max from the all answers
+        idx = similarity.argmax()
+        contexts[i] = "\n".join([sentences[idx % len(sentences)], contexts[i]])
+        debug["tfidf_sentences"].append(sentences[idx % len(sentences)])
+        debug["tfidf_scores"].append(similarity.flat[idx])
+    return contexts2, Dataset.from_dict(debug)
 
 
 class Searcher:
