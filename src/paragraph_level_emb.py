@@ -142,8 +142,8 @@ def main():
     # hparams
     SBERT_MODEL = "BAAI/bge-small-en-v1.5"
     model = SentenceTransformer(SBERT_MODEL).cuda().eval()
-    create_faiss(model, ds_combined, title_trick=False)
-    clean_memory()
+    # create_faiss(model, ds_combined, title_trick=False)
+    # clean_memory()
     create_faiss(model, ds_combined, title_trick=True)
     clean_memory()
     model.save(f"input/llmse-paragraph-level-emb-faiss/{SBERT_MODEL}")
