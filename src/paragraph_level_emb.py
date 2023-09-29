@@ -7,12 +7,13 @@
 # 5. Save the model that creates the embeddings
 
 
+import html
 import re
 from pathlib import Path
 
 import faiss
-import numpy as np
 import torch
+import torch.nn.functional as F
 from datasets import Dataset, concatenate_datasets, load_dataset, load_from_disk
 from sentence_transformers import SentenceTransformer
 from tqdm.auto import tqdm
@@ -20,7 +21,7 @@ from tqdm.auto import tqdm
 from utils import clean_memory
 
 
-def clean(text: str) -> str:
+def clean_stem(text: str) -> str:
     text = text.rsplit("See also", maxsplit=1)[0]
     text = text.rsplit("Bibliography", maxsplit=1)[0]
     text = text.rsplit("References", maxsplit=1)[0]
@@ -38,7 +39,9 @@ def load_wiki_stem() -> Dataset:
     # split="train" makes it a Dataset, not DatasetDict
     ds = load_dataset("parquet", data_files=files, split="train")
     df = ds.to_pandas()
-    df["text"] = df["text"].apply(clean)
+    df["text"] = df["text"].apply(clean_stem)
+    df["title"] = df["title"].apply(lambda x: html.unescape(x))
+    df["text"] = df["text"].apply(lambda x: html.unescape(x))
     # separate to paragraphs
     paragraphs = []
     titles = []
@@ -60,9 +63,25 @@ def load_wiki_stem() -> Dataset:
     return ds
 
 
+def clean_cohere(row: dict) -> dict:
+    # the parser might be confused to string "NaN" as null
+    # has been checked in this dataset, the missing title is only "NaN"
+    # https://en.wikipedia.org/wiki/NaN
+    row["title"] = row["title"] if row["title"] is not None else "NaN"
+    # some paragraphs do not have section title
+    row["section"] = row["section"] if row["section"] is not None else ""
+    # fix string like &quot;
+    row["title"] = html.unescape(row["title"])
+    row["section"] = html.unescape(row["section"])
+    row["text"] = html.unescape(row["text"])
+    return row
+
+
 def load_wiki_cohere() -> Dataset:
-    folder = "input/stem-wiki-cohere-no-emb"
+    folder = "input/all-paraphs-parsed-expanded"
     ds = load_from_disk(folder)
+    ds = ds.map(clean_cohere, num_proc=2)
+    # NOTE wiki cohere has "section", might be useful
     ds = ds.select_columns(["title", "text"])
     return ds
 
@@ -91,7 +110,7 @@ def create_faiss(model: SentenceTransformer, ds: Dataset, title_trick: bool) -> 
         features = model.tokenize(pars)
         features = {k: v.cuda() for k, v in features.items()}
         out_features = model.forward(features)
-        embeddings = out_features["sentence_embedding"]
+        embeddings = F.normalize(out_features["sentence_embedding"], p=2, dim=1)
         # no need to normalize embeddings since we want to use IndexFlatIP (dot prod)
         index.add(embeddings.cpu().numpy())
     savepath = f"input/llmse-paragraph-level-emb-faiss/wiki_{'trick' if title_trick else 'notrick'}.index"
@@ -102,10 +121,10 @@ def main():
     ds_stem = load_wiki_stem()
     ds_cohe = load_wiki_cohere()
 
-    # find duplicates by title (there are *A LOT* of them)
-    stem_titles = set(t.lower() for t in ds_stem["title"])  # n=131008
-    cohe_titles = set(t.lower() for t in ds_cohe["title"])  # n=276824
-    intersection = stem_titles & cohe_titles  # n=108116
+    # find duplicates by title (there are a lot of them)
+    stem_titles = set(t.lower() for t in ds_stem["title"])  # 131008
+    cohe_titles = set(t.lower() for t in ds_cohe["title"])  # 276337
+    intersection = stem_titles & cohe_titles  # 108088
 
     # we need to remove duplicates from wiki stem and merge
     stem_only = ds_stem.filter(lambda x: x["title"].lower() not in intersection)
@@ -121,7 +140,7 @@ def main():
     clean_memory()
 
     # hparams
-    SBERT_MODEL = "all-MiniLM-L6-v2"
+    SBERT_MODEL = "BAAI/bge-small-en-v1.5"
     model = SentenceTransformer(SBERT_MODEL).cuda().eval()
     create_faiss(model, ds_combined, title_trick=False)
     clean_memory()
