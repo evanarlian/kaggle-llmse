@@ -145,7 +145,7 @@ class Searcher:
         D, I = self.index.search(emb, k=k)  # (n_question, k)
         D = D.reshape(D.shape[0] // 5, -1)
         I = I.reshape(I.shape[0] // 5, -1)
-        D_rank = D.argsort(-1)  # NOTE: assume smaller distance is better (L2 index)
+        D_rank = D.argsort(-1)[:, ::-1]  # bigger distance is better (dot product)
         first_dim_idx = np.arange(len(D))[:, None]
         D = D[first_dim_idx, D_rank]
         I = I[first_dim_idx, D_rank]
@@ -167,7 +167,7 @@ def main():
     res = faiss.StandardGpuResources()
     index_gpu = faiss.index_cpu_to_gpu(res, 0, index)
     bi_encoder = SentenceTransformer(
-        "./input/llmse-paragraph-level-emb-faiss/all-MiniLM-L6-v2"
+        "./input/llmse-paragraph-level-emb-faiss/BAAI/bge-small-en-v1.5"
     )
     searcher = Searcher(index_gpu, wiki, bi_encoder)
     questions = ["What is La Nina?", "Who invented radio?"]  # spoiler alert: [B, E]

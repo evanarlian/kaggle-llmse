@@ -102,7 +102,7 @@ def main(cfg: Namespace):
     res = faiss.StandardGpuResources()
     index_gpu = faiss.index_cpu_to_gpu(res, 0, index)
     bi_encoder = SentenceTransformer(
-        "./input/llmse-paragraph-level-emb-faiss/all-MiniLM-L6-v2"
+        "./input/llmse-paragraph-level-emb-faiss/BAAI/bge-small-en-v1.5"
     )
     searcher = Searcher(index_gpu, wiki, bi_encoder)
 
@@ -134,16 +134,67 @@ def main(cfg: Namespace):
     clean_memory()
 
     # adding new contexts
-    print("Adding new contexts to train val test")
-    train_ds = train_ds.add_column(
-        "context", searcher.search_only(train_ds["prompt"], k=cfg.knn)
-    )
-    val_ds = val_ds.add_column(
-        "context", searcher.search_only(val_ds["prompt"], k=cfg.knn)
-    )
-    test_ds = test_ds.add_column(
-        "context", searcher.search_only(test_ds["prompt"], k=cfg.knn)
-    )
+    # TODO refactor later!
+    if cfg.answer_trick == "no":
+        print("Adding contexts just from questions")
+        train_ds = train_ds.add_column(
+            "context", searcher.search_only(train_ds["prompt"], k=cfg.knn)
+        )
+        val_ds = val_ds.add_column(
+            "context", searcher.search_only(val_ds["prompt"], k=cfg.knn)
+        )
+        test_ds = test_ds.add_column(
+            "context", searcher.search_only(test_ds["prompt"], k=cfg.knn)
+        )
+    elif cfg.answer_trick in {"standard", "shorten"}:
+        print("Adding contexts from question and answers")
+        train_ds = train_ds.add_column(
+            "context",
+            searcher.search_include_answer(
+                train_ds["prompt"],
+                answers={
+                    "A": train_ds["A"],
+                    "B": train_ds["B"],
+                    "C": train_ds["C"],
+                    "D": train_ds["D"],
+                    "E": train_ds["E"],
+                },
+                k=cfg.knn,
+                shorten_answer=cfg.answer_trick == "shorten",
+            ),
+        )
+        val_ds = val_ds.add_column(
+            "context",
+            searcher.search_include_answer(
+                val_ds["prompt"],
+                answers={
+                    "A": val_ds["A"],
+                    "B": val_ds["B"],
+                    "C": val_ds["C"],
+                    "D": val_ds["D"],
+                    "E": val_ds["E"],
+                },
+                k=cfg.knn,
+                shorten_answer=cfg.answer_trick == "shorten",
+            ),
+        )
+        test_ds = test_ds.add_column(
+            "context",
+            searcher.search_include_answer(
+                test_ds["prompt"],
+                answers={
+                    "A": test_ds["A"],
+                    "B": test_ds["B"],
+                    "C": test_ds["C"],
+                    "D": test_ds["D"],
+                    "E": test_ds["E"],
+                },
+                k=cfg.knn,
+                shorten_answer=cfg.answer_trick == "shorten",
+            ),
+        )
+    else:
+        assert False, f"Impossible case: {cfg.answer_trick}"
 
     del searcher, bi_encoder, index_gpu, res, index, wiki
     clean_memory()
@@ -260,6 +311,9 @@ if __name__ == "__main__":
     parser.add_argument("--ep", type=float, required=True)
     parser.add_argument("--bs", type=int, required=True)
     parser.add_argument("--grad_acc", type=int, required=True)
+    parser.add_argument(
+        "--answer_trick", type=str, choices=["no", "standard", "shorten"], required=True
+    )
     # optionals
     parser.add_argument("--use_lora", action="store_true")
     parser.add_argument("--lora_r", type=int, default=8)
@@ -270,8 +324,6 @@ if __name__ == "__main__":
     parser.add_argument("--title_trick", action="store_true")
     # enable this flag for fast run and disable wandb
     parser.add_argument("--quick_run", action="store_true")
-    # DEPRECATED: only allow "no" for answer_trick
-    parser.add_argument("--answer_trick", type=str, choices=["no"], default="no")
     cfg = parser.parse_args()
     if cfg.use_lora:
         print("LoRA will automatically freeze layers, overriding freeze_layers")

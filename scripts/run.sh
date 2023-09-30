@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 
+    # parser = ArgumentParser()
     # # required
     # parser.add_argument("--pretrained", type=str, required=True)
     # parser.add_argument("--max_tokens", type=int, required=True)
@@ -7,6 +8,9 @@
     # parser.add_argument("--ep", type=float, required=True)
     # parser.add_argument("--bs", type=int, required=True)
     # parser.add_argument("--grad_acc", type=int, required=True)
+    # parser.add_argument(
+    #     "--answer_trick", type=str, choices=["no", "standard", "shorten"]
+    # )
     # # optionals
     # parser.add_argument("--use_lora", action="store_true")
     # parser.add_argument("--lora_r", type=int, default=8)
@@ -17,8 +21,6 @@
     # parser.add_argument("--title_trick", action="store_true")
     # # enable this flag for fast run and disable wandb
     # parser.add_argument("--quick_run", action="store_true")
-    # # DEPRECATED: only allow "no" for answer_trick
-    # parser.add_argument("--answer_trick", type=str, choices=["no"], default="no")
 
 
 # # LoRA (wandb 12-15)
@@ -49,4 +51,15 @@
 # python src/finetune_mc.py --pretrained=microsoft/deberta-v3-base --max_tokens=512 --knn=8 --ep=2 --bs=2 --grad_acc=16 --freeze_layers=10 --science_only --title_trick
 
 # # RAG
-# python src/finetune_rag.py --pretrained=microsoft/phi-1_5 --max_tokens=512 --knn=12 --ep=1 --bs=1 --grad_acc=32 --use_lora --quick_run
+# python src/finetune_rag.py --pretrained=microsoft/phi-1_5 --max_tokens=1024 --knn=12 --ep=0.2 --bs=1 --grad_acc=32 --use_lora --lora_r=4 --science_only --title_trick
+# python src/finetune_rag.py --pretrained=microsoft/phi-1_5 --max_tokens=1024 --knn=12 --ep=1 --bs=1 --grad_acc=32 --freeze_layers=23 --science_only --title_trick
+# python src/finetune_rag.py --pretrained=microsoft/phi-1_5 --max_tokens=1024 --knn=12 --ep=1 --bs=1 --grad_acc=16 --freeze_layers=23 --science_only --title_trick
+# python src/finetune_rag.py --pretrained=microsoft/phi-1_5 --max_tokens=1024 --knn=12 --ep=1 --bs=1 --grad_acc=8 --freeze_layers=23 --science_only --title_trick
+
+# # back to mc again after changing embedder model and querying context using answer
+# # from this point, will always choose science only and title trick because of the knowledge base is only science and injected with title
+# # standard seem to be the best, but the validation set is too small
+# python src/finetune_mc.py --pretrained=microsoft/deberta-v3-base --science_only --title_trick --max_tokens=256 --knn=4 --ep=1 --bs=4 --grad_acc=8 --freeze_layers=10 --answer_trick=no
+# python src/finetune_mc.py --pretrained=microsoft/deberta-v3-base --science_only --title_trick --max_tokens=256 --knn=4 --ep=1 --bs=4 --grad_acc=8 --freeze_layers=10 --answer_trick=standard
+# python src/finetune_mc.py --pretrained=microsoft/deberta-v3-base --science_only --title_trick --max_tokens=256 --knn=4 --ep=1 --bs=4 --grad_acc=8 --freeze_layers=10 --answer_trick=shorten
+
