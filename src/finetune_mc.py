@@ -25,7 +25,6 @@ from transformers import (
 )
 
 from searcher import Searcher
-from utils import clean_memory
 
 
 @dataclass
@@ -84,9 +83,7 @@ def make_answer(logits: np.ndarray) -> list[str]:
     return [" ".join(row) for row in top3_choices]
 
 
-def main(cfg: Namespace):
-    os.environ["TOKENIZERS_PARALLELISM"] = "false"
-
+def load_all_data(cfg: Namespace) -> tuple[Dataset, Dataset, Dataset]:
     # load all data-related
     wiki = load_from_disk("input/llmse-paragraph-level-emb-faiss/wiki_stem_paragraph")
     if cfg.title_trick:
@@ -116,25 +113,19 @@ def main(cfg: Namespace):
     train_df = train_df.drop(
         columns=["context", "source", "science_prob", "is_science"]
     )
-    val_df = pd.read_csv("input/kaggle-llm-science-exam/train.csv").drop(columns="id")
+    val_df = pd.concat(
+        [
+            pd.read_csv("input/kaggle-llm-science-exam/train.csv").drop(columns="id"),
+            pd.read_csv("input/dataset-wiki-new-1/dataset_wiki_new_1_balanced.csv"),
+        ]
+    ).reset_index(drop=True)
     test_df = pd.read_csv("input/kaggle-llm-science-exam/test.csv").drop(columns="id")
     test_df["answer"] = "A"  # fake answer so that the columns are uniform
     train_ds = Dataset.from_pandas(train_df)
     val_ds = Dataset.from_pandas(val_df)
     test_ds = Dataset.from_pandas(test_df)
-    # # save to disk so that future map operations are cached
-    # train_ds.save_to_disk("input/llmse-finetune-mc/train_ds")
-    # val_ds.save_to_disk("input/llmse-finetune-mc/val_ds")
-    # test_ds.save_to_disk("input/llmse-finetune-mc/test_ds")
-    # train_ds = load_from_disk("input/llmse-finetune-mc/train_ds")
-    # val_ds = load_from_disk("input/llmse-finetune-mc/val_ds")
-    # test_ds = load_from_disk("input/llmse-finetune-mc/test_ds")
-
-    del train_df, val_df, test_df
-    clean_memory()
 
     # adding new contexts
-    # TODO refactor later!
     if cfg.answer_trick == "no":
         print("Adding contexts just from questions")
         train_ds = train_ds.add_column(
@@ -152,13 +143,7 @@ def main(cfg: Namespace):
             "context",
             searcher.search_include_answer(
                 train_ds["prompt"],
-                answers={
-                    "A": train_ds["A"],
-                    "B": train_ds["B"],
-                    "C": train_ds["C"],
-                    "D": train_ds["D"],
-                    "E": train_ds["E"],
-                },
+                answers={ans: train_ds[ans] for ans in "ABCDE"},
                 k=cfg.knn,
                 shorten_answer=cfg.answer_trick == "shorten",
             ),
@@ -167,13 +152,7 @@ def main(cfg: Namespace):
             "context",
             searcher.search_include_answer(
                 val_ds["prompt"],
-                answers={
-                    "A": val_ds["A"],
-                    "B": val_ds["B"],
-                    "C": val_ds["C"],
-                    "D": val_ds["D"],
-                    "E": val_ds["E"],
-                },
+                answers={ans: val_ds[ans] for ans in "ABCDE"},
                 k=cfg.knn,
                 shorten_answer=cfg.answer_trick == "shorten",
             ),
@@ -182,13 +161,7 @@ def main(cfg: Namespace):
             "context",
             searcher.search_include_answer(
                 test_ds["prompt"],
-                answers={
-                    "A": test_ds["A"],
-                    "B": test_ds["B"],
-                    "C": test_ds["C"],
-                    "D": test_ds["D"],
-                    "E": test_ds["E"],
-                },
+                answers={ans: test_ds[ans] for ans in "ABCDE"},
                 k=cfg.knn,
                 shorten_answer=cfg.answer_trick == "shorten",
             ),
@@ -196,8 +169,19 @@ def main(cfg: Namespace):
     else:
         assert False, f"Impossible case: {cfg.answer_trick}"
 
-    del searcher, bi_encoder, index_gpu, res, index, wiki
-    clean_memory()
+    return train_ds, val_ds, test_ds
+
+
+def main(cfg: Namespace):
+    os.environ["TOKENIZERS_PARALLELISM"] = "false"
+    train_ds, val_ds, test_ds = load_all_data(cfg)
+    # # save to disk so that future map operations are cached
+    # train_ds.save_to_disk("input/llmse-finetune-mc/train_ds")
+    # val_ds.save_to_disk("input/llmse-finetune-mc/val_ds")
+    # test_ds.save_to_disk("input/llmse-finetune-mc/test_ds")
+    # train_ds = load_from_disk("input/llmse-finetune-mc/train_ds")
+    # val_ds = load_from_disk("input/llmse-finetune-mc/val_ds")
+    # test_ds = load_from_disk("input/llmse-finetune-mc/test_ds")
 
     # pretokenize train val test
     print(f"Pretokenize using max length {cfg.max_tokens}")
@@ -251,6 +235,8 @@ def main(cfg: Namespace):
         config=cfg,
     )
 
+    # NOTE: turns out the debertav3 authors have already provided us the reasonable
+    # hparams for finetuning https://arxiv.org/abs/2111.09543, table 11
     training_args = TrainingArguments(
         # administration
         output_dir="input/llmse-finetune-mc/checkpoints",
@@ -274,9 +260,14 @@ def main(cfg: Namespace):
         label_smoothing_factor=0.0,
         dataloader_pin_memory=True,
         # optimizer
+        optim="adamw_8bit",  # TODO this shit does not work!
         lr_scheduler_type="linear",
-        warmup_ratio=0.2,
-        learning_rate=2e-5,
+        adam_epsilon=1e-6,
+        adam_beta1=0.9,
+        adam_beta2=0.999,
+        max_grad_norm=1.0,
+        warmup_ratio=0.1,
+        learning_rate=cfg.lr,
         weight_decay=0.01,
     )
 
@@ -309,6 +300,7 @@ if __name__ == "__main__":
     parser.add_argument("--max_tokens", type=int, required=True)
     parser.add_argument("--knn", type=int, required=True)
     parser.add_argument("--ep", type=float, required=True)
+    parser.add_argument("--lr", type=float, required=True)
     parser.add_argument("--bs", type=int, required=True)
     parser.add_argument("--grad_acc", type=int, required=True)
     parser.add_argument(
