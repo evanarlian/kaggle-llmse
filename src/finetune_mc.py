@@ -308,6 +308,11 @@ def main(cfg: Namespace):
     trainer.evaluate()
     wandb.finish()  # this is for notebook
 
+    # save model for further testing
+    result_path = temp_folder / "finished" / cfg.pretrained.split("/")[-1]
+    trainer.save_model(result_path)
+    tokenizer.save_pretrained(result_path)
+    
     # predict and submit
     output = trainer.predict(test_ds)
     preds = make_answer(output.predictions)
