@@ -7,6 +7,7 @@
 import os
 from argparse import ArgumentParser, Namespace
 from dataclasses import dataclass
+from pathlib import Path
 
 import faiss
 import numpy as np
@@ -53,8 +54,7 @@ class DataCollatorForMultipleChoice:
 def pretokenize(row: dict, tokenizer: PreTrainedTokenizerBase):
     """Convert single row of data to 5 multiple choices and a label"""
     first_sentences = [row["context"]] * 5
-    template = "Question: {}\nAnswer: {}"
-    second_sentences = [template.format(row["prompt"], row[ans]) for ans in "ABCDE"]
+    second_sentences = [f"{row['prompt']} {row[ans]}" for ans in "ABCDE"]
     encoded = tokenizer(first_sentences, second_sentences, truncation="only_first")
     label2id = {"A": 0, "B": 1, "C": 2, "D": 3, "E": 4}
     encoded["labels"] = label2id[row["answer"]]
@@ -174,14 +174,32 @@ def load_all_data(cfg: Namespace) -> tuple[Dataset, Dataset, Dataset]:
 
 def main(cfg: Namespace):
     os.environ["TOKENIZERS_PARALLELISM"] = "false"
-    train_ds, val_ds, test_ds = load_all_data(cfg)
-    # # save to disk so that future map operations are cached
-    # train_ds.save_to_disk("input/llmse-finetune-mc/train_ds")
-    # val_ds.save_to_disk("input/llmse-finetune-mc/val_ds")
-    # test_ds.save_to_disk("input/llmse-finetune-mc/test_ds")
-    # train_ds = load_from_disk("input/llmse-finetune-mc/train_ds")
-    # val_ds = load_from_disk("input/llmse-finetune-mc/val_ds")
-    # test_ds = load_from_disk("input/llmse-finetune-mc/test_ds")
+
+    # folder for everything
+    _sci = "sci" if cfg.science_only else "nosci"
+    _ttrick = "ttrick" if cfg.title_trick else "nottrick"
+    _atrick = cfg.answer_trick
+    _knn = f"knn{cfg.knn}"
+    temp_folder = Path(f"input/llmse-finetune-mc/{_sci}_{_ttrick}_{_atrick}_{_knn}")
+
+    # load and cache data
+    if cfg.quick_run:
+        train_ds, val_ds, test_ds = load_all_data(cfg)
+    else:
+        try:
+            train_ds = load_from_disk(temp_folder / "train_ds")
+            val_ds = load_from_disk(temp_folder / "val_ds")
+            test_ds = load_from_disk(temp_folder / "test_ds")
+        except Exception as e:
+            print(e)
+            train_ds, val_ds, test_ds = load_all_data(cfg)
+            # save to disk so that map operations are cached
+            train_ds.save_to_disk(temp_folder / "train_ds")
+            val_ds.save_to_disk(temp_folder / "val_ds")
+            test_ds.save_to_disk(temp_folder / "test_ds")
+            train_ds = load_from_disk(temp_folder / "train_ds")
+            val_ds = load_from_disk(temp_folder / "val_ds")
+            test_ds = load_from_disk(temp_folder / "test_ds")
 
     # pretokenize train val test
     print(f"Pretokenize using max length {cfg.max_tokens}")
@@ -190,11 +208,13 @@ def main(cfg: Namespace):
     )
     unused = ["prompt", "A", "B", "C", "D", "E", "answer", "context"]
     train_ds = train_ds.map(
-        lambda row: pretokenize(row, tokenizer), remove_columns=unused
+        lambda row: pretokenize(row, tokenizer), remove_columns=unused, num_proc=6
     )
-    val_ds = val_ds.map(lambda row: pretokenize(row, tokenizer), remove_columns=unused)
+    val_ds = val_ds.map(
+        lambda row: pretokenize(row, tokenizer), remove_columns=unused, num_proc=6
+    )
     test_ds = test_ds.map(
-        lambda row: pretokenize(row, tokenizer), remove_columns=unused
+        lambda row: pretokenize(row, tokenizer), remove_columns=unused, num_proc=6
     )
     print(train_ds)
 
@@ -239,19 +259,21 @@ def main(cfg: Namespace):
     # hparams for finetuning https://arxiv.org/abs/2111.09543, table 11
     training_args = TrainingArguments(
         # administration
-        output_dir="input/llmse-finetune-mc/checkpoints",
+        output_dir=temp_folder / "ckpt",
         overwrite_output_dir=True,
+        save_total_limit=1,
         evaluation_strategy="steps",
-        eval_steps=200,
+        eval_steps=100,
         logging_strategy="steps",
-        logging_steps=200,
+        logging_steps=100,
         save_strategy="epoch",
-        save_steps=200,
+        save_steps=100,
         report_to=["wandb"],
         load_best_model_at_end=False,
         # training
         remove_unused_columns=False,  # why did hf remove `token_type_ids`?
         fp16=True,
+        gradient_checkpointing=True,
         dataloader_num_workers=1,
         num_train_epochs=cfg.ep,
         per_device_train_batch_size=cfg.bs,
@@ -260,7 +282,8 @@ def main(cfg: Namespace):
         label_smoothing_factor=0.0,
         dataloader_pin_memory=True,
         # optimizer
-        optim="adamw_8bit",  # TODO this shit does not work!
+        # optim="adamw_8bit",
+        optim="adamw_torch",
         lr_scheduler_type="linear",
         adam_epsilon=1e-6,
         adam_beta1=0.9,
