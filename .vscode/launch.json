@@ -5,7 +5,7 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Python: Current File",
+            "name": "py: curr",
             "type": "python",
             "request": "launch",
             "program": "${file}",
@@ -13,12 +13,37 @@
             "justMyCode": true
         },
         {
-            "name": "Python: Current File + Libraries",
+            "name": "py: curr + lib",
             "type": "python",
             "request": "launch",
             "program": "${file}",
             "console": "integratedTerminal",
             "justMyCode": false
+        },
+        {
+            "name": "py: finetune_mc",
+            "type": "python",
+            "request": "launch",
+            "program": "src/finetune_mc.py",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "env": {
+                "WANDB_MODE": "disabled",
+            },
+            "args": [
+                "--pretrained=microsoft/deberta-v3-base",
+                "--science_only",
+                "--title_trick",
+                "--max_tokens=512",
+                "--knn=16",
+                "--ep=1",
+                "--lr=2e-5",
+                "--bs=4",
+                "--grad_acc=8",
+                "--freeze_layers=10",
+                "--answer_trick=standard",
+                // "--quick_run",
+            ],
         },
     ]
 }
