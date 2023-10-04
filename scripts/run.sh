@@ -67,12 +67,19 @@
 # python src/finetune_mc.py --pretrained=microsoft/deberta-v3-base --title_trick --max_tokens=256 --knn=4 --lr=2e-5 --ep=1 --bs=4 --grad_acc=8 --freeze_layers=10 --answer_trick=standard
 # python src/finetune_mc.py --pretrained=microsoft/deberta-v3-base --title_trick --max_tokens=256 --knn=4 --lr=2e-5 --ep=1 --bs=4 --grad_acc=8 --freeze_layers=10 --answer_trick=shorten
 
-# run again after following paper hparams, using grad ckpt, new val dataset
-# * try to match paper (learning rate)
-# * unfreeze 8 for sanity check
-# * 384 ctx seems plenty
-# * batch size 32 seems okay too
-# * will try more experiment after
+# # run again after following paper hparams, using grad ckpt, new val dataset
+# # * try to match paper (learning rate)
+# # * 384 ctx seems plenty
+# # * batch size 32 seems okay too
+# # * will try more experiment after
 # export WANDB_MODE=disabled
-python src/finetune_mc.py --pretrained=microsoft/deberta-v3-base --science_only --title_trick --max_tokens=384 --knn=16 --ep=1 --lr=2e-5 --bs=8 --grad_acc=4 --freeze_layers=4 --answer_trick=standard
-python src/finetune_mc.py --pretrained=microsoft/deberta-v3-large --science_only --title_trick --max_tokens=384 --knn=16 --ep=1 --lr=8e-6 --bs=8 --grad_acc=4 --freeze_layers=16 --answer_trick=standard
+# python src/finetune_mc.py --pretrained=microsoft/deberta-v3-base --science_only --title_trick --max_tokens=384 --knn=16 --ep=1 --lr=2e-5 --bs=8 --grad_acc=4 --freeze_layers=4 --answer_trick=standard
+# python src/finetune_mc.py --pretrained=microsoft/deberta-v3-large --science_only --title_trick --max_tokens=384 --knn=16 --ep=1 --lr=8e-6 --bs=8 --grad_acc=4 --freeze_layers=16 --answer_trick=standard
+# python src/finetune_mc.py --pretrained=microsoft/deberta-v3-base --science_only --title_trick --max_tokens=384 --knn=16 --ep=2 --lr=2e-5 --bs=8 --grad_acc=4 --freeze_layers=4 --answer_trick=standard
+# python src/finetune_mc.py --pretrained=microsoft/deberta-v3-base --science_only --title_trick --max_tokens=384 --knn=16 --ep=3 --lr=2e-5 --bs=8 --grad_acc=4 --freeze_layers=4 --answer_trick=standard
+# python src/finetune_mc.py --pretrained=microsoft/deberta-v3-base --science_only --title_trick --max_tokens=384 --knn=16 --ep=1 --lr=6e-5 --bs=8 --grad_acc=4 --freeze_layers=4 --answer_trick=standard
+# python src/finetune_mc.py --pretrained=microsoft/deberta-v3-base --science_only --title_trick --max_tokens=384 --knn=16 --ep=1 --lr=5e-5 --bs=16 --grad_acc=2 --freeze_layers=0 --answer_trick=standard
+
+# # these models are better than just vanilla pretrained
+# python src/finetune_mc.py --pretrained=sileod/deberta-v3-base-tasksource-nli --science_only --title_trick --max_tokens=384 --knn=16 --ep=1 --lr=2e-5 --bs=8 --grad_acc=4 --freeze_layers=4 --answer_trick=standard
+# python src/finetune_mc.py --pretrained=sileod/deberta-v3-large-tasksource-nli --science_only --title_trick --max_tokens=384 --knn=16 --ep=0.1 --lr=8e-6 --bs=8 --grad_acc=4 --freeze_layers=16 --answer_trick=standard
