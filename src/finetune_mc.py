@@ -26,6 +26,7 @@ from transformers import (
 )
 
 from searcher import Searcher
+from utils import clean_memory
 
 
 @dataclass
@@ -200,6 +201,7 @@ def main(cfg: Namespace):
             train_ds = load_from_disk(temp_folder / "train_ds")
             val_ds = load_from_disk(temp_folder / "val_ds")
             test_ds = load_from_disk(temp_folder / "test_ds")
+    clean_memory()
 
     # pretokenize train val test
     print(f"Pretokenize using max length {cfg.max_tokens}")
@@ -219,7 +221,9 @@ def main(cfg: Namespace):
     print(train_ds)
 
     # load the main model
-    model = AutoModelForMultipleChoice.from_pretrained(cfg.pretrained)
+    model = AutoModelForMultipleChoice.from_pretrained(
+        cfg.pretrained, ignore_mismatched_sizes=True
+    )
     # freeze embedding, always freeze for now
     print("Freezing embedding layers")
     for param in model.deberta.embeddings.parameters():
@@ -312,7 +316,7 @@ def main(cfg: Namespace):
     result_path = temp_folder / "finished" / cfg.pretrained.split("/")[-1]
     trainer.save_model(result_path)
     tokenizer.save_pretrained(result_path)
-    
+
     # predict and submit
     output = trainer.predict(test_ds)
     preds = make_answer(output.predictions)
