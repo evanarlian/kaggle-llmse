@@ -14,7 +14,7 @@ import torch
 import torch.nn.functional as F
 import wandb
 from datasets import Dataset, load_from_disk
-from peft import LoraConfig, TaskType, get_peft_model
+from peft import LoraConfig, get_peft_model
 from sentence_transformers import SentenceTransformer
 from torch import nn
 from tqdm.auto import tqdm
@@ -181,8 +181,11 @@ def main(cfg: Namespace):
 
     # load the main model
     model = AutoModelForCausalLM.from_pretrained(
-        cfg.pretrained, trust_remote_code=True, torch_dtype="auto"
+        cfg.pretrained,
+        trust_remote_code=True,
+        # revision="4a426d8015bef5a0cb3acff8d4474ee9ab4071d5",  # idk why is that changed
     )
+    # phi1.5 have 26 layers, index: 0 embedding, 1-24 attention, 25 causal head
     # freeze embedding, always freeze for now
     print("Freezing embedding layers")
     for param in model.layers[0].parameters():
