@@ -9,6 +9,7 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from tqdm.auto import tqdm
 
 
+# NOTE: unused, too slow!
 @torch.no_grad()
 def search_and_rerank_context(
     wiki: Dataset,
@@ -191,7 +192,7 @@ def main():
     for par in pars:
         print("  >>>", par)
 
-    # we can see that by injecting answer during search, the result will be bad
+    # we can see that by injecting answer during search, the result can be worse
 
 
 if __name__ == "__main__":
