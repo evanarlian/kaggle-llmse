@@ -83,3 +83,5 @@
 # # these models are better than just vanilla pretrained
 # python src/finetune_mc.py --pretrained=sileod/deberta-v3-base-tasksource-nli --science_only --title_trick --max_tokens=384 --knn=16 --ep=1 --lr=2e-5 --bs=8 --grad_acc=4 --freeze_layers=4 --answer_trick=standard
 # python src/finetune_mc.py --pretrained=sileod/deberta-v3-large-tasksource-nli --science_only --title_trick --max_tokens=384 --knn=16 --ep=0.1 --lr=8e-6 --bs=8 --grad_acc=4 --freeze_layers=16 --answer_trick=standard
+python src/finetune_mc.py --pretrained=BAAI/bge-large-en-v1.5 --science_only --title_trick --max_tokens=384 --knn=16 --ep=0.5 --lr=8e-6 --bs=8 --grad_acc=4 --freeze_layers=16 --answer_trick=shorten
+python src/finetune_mc.py --pretrained=sileod/deberta-v3-large-tasksource-nli --science_only --title_trick --max_tokens=384 --knn=16 --ep=0.5 --lr=8e-6 --bs=8 --grad_acc=4 --freeze_layers=16 --answer_trick=standard

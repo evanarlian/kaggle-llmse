@@ -17,6 +17,7 @@ import wandb
 from datasets import Dataset, load_from_disk
 from peft import LoraConfig, TaskType, get_peft_model
 from sentence_transformers import SentenceTransformer
+from torch import nn
 from transformers import (
     AutoModelForMultipleChoice,
     AutoTokenizer,
@@ -173,6 +174,29 @@ def load_all_data(cfg: Namespace) -> tuple[Dataset, Dataset, Dataset]:
     return train_ds, val_ds, test_ds
 
 
+def freeze(model: nn.Module, cfg: Namespace):
+    if "deberta" in cfg.pretrained:
+        print("Freezing embedding layers")
+        for param in model.deberta.embeddings.parameters():
+            param.requires_grad = False
+        if cfg.freeze_layers is not None and cfg.freeze_layers > 0:
+            print(f"Freezing {cfg.freeze_layers} encoder layers")
+            for layer in model.deberta.encoder.layer[: cfg.freeze_layers]:
+                for param in layer.parameters():
+                    param.requires_grad = False
+    elif "bge" in cfg.pretrained:
+        print("Freezing embedding layers")
+        for param in model.bert.embeddings.parameters():
+            param.requires_grad = False
+        if cfg.freeze_layers is not None and cfg.freeze_layers > 0:
+            print(f"Freezing {cfg.freeze_layers} encoder layers")
+            for layer in model.bert.encoder.layer[: cfg.freeze_layers]:
+                for param in layer.parameters():
+                    param.requires_grad = False
+    else:
+        raise ValueError(f"Freezing not supported: {cfg.pretrained}")
+
+
 def main(cfg: Namespace):
     os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
@@ -224,16 +248,43 @@ def main(cfg: Namespace):
     model = AutoModelForMultipleChoice.from_pretrained(
         cfg.pretrained, ignore_mismatched_sizes=True
     )
-    # freeze embedding, always freeze for now
-    print("Freezing embedding layers")
-    for param in model.deberta.embeddings.parameters():
-        param.requires_grad = False
-    # freezing layers, this is for finetuning
-    if cfg.freeze_layers is not None and cfg.freeze_layers > 0:
-        print(f"Freezing {cfg.freeze_layers} encoder layers")
-        for layer in model.deberta.encoder.layer[: cfg.freeze_layers]:
-            for param in layer.parameters():
-                param.requires_grad = False
+    freeze(model, cfg)
+    # ####
+    # # torch.autograd.set_detect_anomaly(True)
+    # optimizer = torch.optim.AdamW(model.parameters(), lr=8e-6)
+    # model.cuda()
+    # model.gradient_checkpointing_enable()
+    # from torch.utils.data import DataLoader
+    # from torch.cuda.amp import autocast, GradScaler
+    # dl = DataLoader(
+    #     train_ds,
+    #     batch_size=1,
+    #     shuffle=False,
+    #     collate_fn=DataCollatorForMultipleChoice(tokenizer=tokenizer),
+    # )
+    # batch = next(iter(dl))
+    # batch = {k: v.to("cuda") for k, v in batch.items()}
+
+    # # fake train 1 time
+    # scaler = GradScaler()
+    # N = 10
+    # for i in range(N):
+    #     with autocast():
+    #         out = model(**batch)
+    #     # out.loss.backward()
+    #     # optimizer.step()
+    #     scaler.scale(out.loss).backward()
+    #     scaler.step(optimizer)
+    #     scaler.update()
+    #     if i < N - 1:
+    #         optimizer.zero_grad()
+
+    # for name, param in model.named_parameters():
+    #     print(param.grad.max().item() if param.grad is not None else "--", name)
+    # from IPython import embed
+
+    # embed()
+    # ####
     # lora, do it last because if changes the actual model
     if cfg.use_lora:
         print("Using LoRA")
@@ -278,7 +329,7 @@ def main(cfg: Namespace):
         remove_unused_columns=False,  # why did hf remove `token_type_ids`?
         fp16=True,
         gradient_checkpointing=True,
-        dataloader_num_workers=1,
+        dataloader_num_workers=2,
         num_train_epochs=cfg.ep,
         per_device_train_batch_size=cfg.bs,
         per_device_eval_batch_size=cfg.bs,
