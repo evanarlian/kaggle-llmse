@@ -51,9 +51,10 @@ def main():
     # extract contexts and reshaped-qa
     contexts = val_ds["context"]
     qas = []
+    prefix = "Represent this sentence for searching relevant passages:"
     for line in val_ds:
         for ans in "ABCDE":
-            template = f"{line['prompt']} {line[ans]}"
+            template = f"{prefix} {line['prompt']} {line[ans]}"
             qas.append(template)
     print(len(contexts), len(qas), "must be 5 times")
 

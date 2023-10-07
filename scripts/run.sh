@@ -80,8 +80,13 @@
 # python src/finetune_mc.py --pretrained=microsoft/deberta-v3-base --science_only --title_trick --max_tokens=384 --knn=16 --ep=1 --lr=6e-5 --bs=8 --grad_acc=4 --freeze_layers=4 --answer_trick=standard
 # python src/finetune_mc.py --pretrained=microsoft/deberta-v3-base --science_only --title_trick --max_tokens=384 --knn=16 --ep=1 --lr=5e-5 --bs=16 --grad_acc=2 --freeze_layers=0 --answer_trick=standard
 
-# # these models are better than just vanilla pretrained
+# # these models might be better than just vanilla pretrained
 # python src/finetune_mc.py --pretrained=sileod/deberta-v3-base-tasksource-nli --science_only --title_trick --max_tokens=384 --knn=16 --ep=1 --lr=2e-5 --bs=8 --grad_acc=4 --freeze_layers=4 --answer_trick=standard
 # python src/finetune_mc.py --pretrained=sileod/deberta-v3-large-tasksource-nli --science_only --title_trick --max_tokens=384 --knn=16 --ep=0.1 --lr=8e-6 --bs=8 --grad_acc=4 --freeze_layers=16 --answer_trick=standard
-python src/finetune_mc.py --pretrained=BAAI/bge-large-en-v1.5 --science_only --title_trick --max_tokens=384 --knn=16 --ep=0.5 --lr=8e-6 --bs=8 --grad_acc=4 --freeze_layers=16 --answer_trick=shorten
-python src/finetune_mc.py --pretrained=sileod/deberta-v3-large-tasksource-nli --science_only --title_trick --max_tokens=384 --knn=16 --ep=0.5 --lr=8e-6 --bs=8 --grad_acc=4 --freeze_layers=16 --answer_trick=standard
+# python src/finetune_mc.py --pretrained=BAAI/bge-large-en-v1.5 --science_only --title_trick --max_tokens=384 --knn=16 --ep=0.5 --lr=8e-6 --bs=8 --grad_acc=4 --freeze_layers=16 --answer_trick=shorten
+# python src/finetune_mc.py --pretrained=sileod/deberta-v3-large-tasksource-nli --science_only --title_trick --max_tokens=384 --knn=16 --ep=0.5 --lr=8e-6 --bs=8 --grad_acc=4 --freeze_layers=16 --answer_trick=standard
+# python src/finetune_mc.py --pretrained=BAAI/bge-large-en-v1.5 --science_only --title_trick --max_tokens=384 --knn=16 --ep=1 --lr=5e-5 --bs=8 --grad_acc=4 --freeze_layers=12 --answer_trick=shorten
+
+# # it's longformering time
+# python src/finetune_mc.py --pretrained=potsawee/longformer-large-4096-answering-race --science_only --title_trick --max_tokens=512 --knn=16 --ep=0.5 --lr=2e-5 --bs=8 --grad_acc=4 --freeze_layers=12 --answer_trick=shorten
+# python src/finetune_mc.py --pretrained=potsawee/longformer-large-4096-answering-race --science_only --title_trick --max_tokens=512 --knn=16 --ep=0.5 --lr=2e-5 --bs=8 --grad_acc=1 --freeze_layers=12 --answer_trick=shorten
