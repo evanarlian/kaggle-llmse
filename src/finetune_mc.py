@@ -38,15 +38,11 @@ class DataCollatorForMultipleChoice:
 
     def __call__(self, batch):
         # labels do not play well with the rest, do this first
-        labels = torch.tensor([row["labels"] for row in batch])
+        labels = torch.tensor([row.pop("labels") for row in batch])
         # flatten: batch has multiple rows, each row's key-value has 5 choices
-        # fmt: off
         batch = {
-            "input_ids": [choice for row in batch for choice in row["input_ids"]],
-            "token_type_ids": [choice for row in batch for choice in row["token_type_ids"]],
-            "attention_mask": [choice for row in batch for choice in row["attention_mask"]],
+            k: [choice for row in batch for choice in row[k]] for k in batch[0].keys()
         }
-        # fmt: on
         batch = self.tokenizer.pad(batch, return_tensors="pt")
         batch = {k: v.view(-1, 5, v.size(-1)) for k, v in batch.items()}
         batch["labels"] = labels
@@ -175,26 +171,26 @@ def load_all_data(cfg: Namespace) -> tuple[Dataset, Dataset, Dataset]:
 
 
 def freeze(model: nn.Module, cfg: Namespace):
+    # so far, the models only differ in the core layer name. Must do manual check
+    # first before adding here
     if "deberta" in cfg.pretrained:
-        print("Freezing embedding layers")
-        for param in model.deberta.embeddings.parameters():
-            param.requires_grad = False
-        if cfg.freeze_layers is not None and cfg.freeze_layers > 0:
-            print(f"Freezing {cfg.freeze_layers} encoder layers")
-            for layer in model.deberta.encoder.layer[: cfg.freeze_layers]:
-                for param in layer.parameters():
-                    param.requires_grad = False
+        layer_type = "deberta"
     elif "bge" in cfg.pretrained:
-        print("Freezing embedding layers")
-        for param in model.bert.embeddings.parameters():
-            param.requires_grad = False
-        if cfg.freeze_layers is not None and cfg.freeze_layers > 0:
-            print(f"Freezing {cfg.freeze_layers} encoder layers")
-            for layer in model.bert.encoder.layer[: cfg.freeze_layers]:
-                for param in layer.parameters():
-                    param.requires_grad = False
+        layer_type = "bert"
+    elif "longformer" in cfg.pretrained:
+        layer_type = "longformer"
     else:
         raise ValueError(f"Freezing not supported: {cfg.pretrained}")
+    # always freeze first embedding layers, for now
+    print("Freezing embedding layers")
+    for param in getattr(model, layer_type).embeddings.parameters():
+        param.requires_grad = False
+    # freeze encoder layers
+    if cfg.freeze_layers is not None and cfg.freeze_layers > 0:
+        print(f"Freezing {cfg.freeze_layers} {layer_type} encoder layers")
+        for layer in getattr(model, layer_type).encoder.layer[: cfg.freeze_layers]:
+            for param in layer.parameters():
+                param.requires_grad = False
 
 
 def main(cfg: Namespace):
@@ -326,7 +322,6 @@ def main(cfg: Namespace):
         report_to=["wandb"],
         load_best_model_at_end=False,
         # training
-        remove_unused_columns=False,  # why did hf remove `token_type_ids`?
         fp16=True,
         gradient_checkpointing=True,
         dataloader_num_workers=2,
