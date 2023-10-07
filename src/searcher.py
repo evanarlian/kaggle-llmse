@@ -120,7 +120,9 @@ class Searcher:
         return paragraphs
 
     def search_only(self, questions: list[str], k: int) -> list[str]:
-        emb = self.bi_encoder.encode(questions, show_progress_bar=False, device="cuda")
+        emb = self.bi_encoder.encode(
+            questions, show_progress_bar=False, normalize_embeddings=True, device="cuda"
+        )
         D, I = self.index.search(emb, k=k)  # (n_question, k)
         return self.get_paragraphs(I)
 
@@ -142,7 +144,9 @@ class Searcher:
             if shorten_answer:
                 A, B, C, D, E = self.remove_common_suffix_prefix([A, B, C, D, E])
             combined += [f"{ques} {ans}" for ans in [A, B, C, D, E]]
-        emb = self.bi_encoder.encode(combined, show_progress_bar=False, device="cuda")
+        emb = self.bi_encoder.encode(
+            combined, show_progress_bar=False, normalize_embeddings=True, device="cuda"
+        )
         D, I = self.index.search(emb, k=k)  # (n_question, k)
         D = D.reshape(D.shape[0] // 5, -1)
         I = I.reshape(I.shape[0] // 5, -1)
