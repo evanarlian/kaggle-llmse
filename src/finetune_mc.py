@@ -108,9 +108,7 @@ def load_all_data(cfg: Namespace) -> tuple[Dataset, Dataset, Dataset]:
         train_df = train_df[train_df["is_science"]].reset_index(drop=True)
     if cfg.quick_run:
         train_df = train_df.iloc[:300]
-    train_df = train_df.drop(
-        columns=["context", "source", "science_prob", "is_science"]
-    )
+    train_df = train_df.drop(columns=["source", "science_prob"])
     val_df = pd.concat(
         [
             pd.read_csv("input/kaggle-llm-science-exam/train.csv").drop(columns="id"),
@@ -119,54 +117,48 @@ def load_all_data(cfg: Namespace) -> tuple[Dataset, Dataset, Dataset]:
     ).reset_index(drop=True)
     test_df = pd.read_csv("input/kaggle-llm-science-exam/test.csv").drop(columns="id")
     test_df["answer"] = "A"  # fake answer so that the columns are uniform
-    train_ds = Dataset.from_pandas(train_df)
-    val_ds = Dataset.from_pandas(val_df)
-    test_ds = Dataset.from_pandas(test_df)
 
     # adding new contexts
+    sci = train_df["is_science"]
     if cfg.answer_trick == "no":
         print("Adding contexts just from questions")
-        train_ds = train_ds.add_column(
-            "context", searcher.search_only(train_ds["prompt"], k=cfg.knn)
-        )
-        val_ds = val_ds.add_column(
-            "context", searcher.search_only(val_ds["prompt"], k=cfg.knn)
-        )
-        test_ds = test_ds.add_column(
-            "context", searcher.search_only(test_ds["prompt"], k=cfg.knn)
+        if cfg.replace_ctx:
+            train_df.loc[sci, "context"] = searcher.search_only(
+                train_df.loc[sci, "prompt"].to_list(), k=cfg.knn
+            )
+        val_df["context"] = searcher.search_only(val_df["prompt"].to_list(), k=cfg.knn)
+        test_df["context"] = searcher.search_only(
+            test_df["prompt"].to_list(), k=cfg.knn
         )
     elif cfg.answer_trick in {"standard", "shorten"}:
         print("Adding contexts from question and answers")
-        train_ds = train_ds.add_column(
-            "context",
-            searcher.search_include_answer(
-                train_ds["prompt"],
-                answers={ans: train_ds[ans] for ans in "ABCDE"},
+        if cfg.replace_ctx:
+            train_df.loc[sci, "context"] = searcher.search_include_answer(
+                train_df.loc[sci, "prompt"].to_list(),
+                answers={ans: train_df.loc[sci, ans].to_list() for ans in "ABCDE"},
                 k=cfg.knn,
                 shorten_answer=cfg.answer_trick == "shorten",
-            ),
+            )
+        val_df["context"] = searcher.search_include_answer(
+            val_df["prompt"].to_list(),
+            answers={ans: val_df[ans].to_list() for ans in "ABCDE"},
+            k=cfg.knn,
+            shorten_answer=cfg.answer_trick == "shorten",
         )
-        val_ds = val_ds.add_column(
-            "context",
-            searcher.search_include_answer(
-                val_ds["prompt"],
-                answers={ans: val_ds[ans] for ans in "ABCDE"},
-                k=cfg.knn,
-                shorten_answer=cfg.answer_trick == "shorten",
-            ),
-        )
-        test_ds = test_ds.add_column(
-            "context",
-            searcher.search_include_answer(
-                test_ds["prompt"],
-                answers={ans: test_ds[ans] for ans in "ABCDE"},
-                k=cfg.knn,
-                shorten_answer=cfg.answer_trick == "shorten",
-            ),
+        test_df["context"] = searcher.search_include_answer(
+            test_df["prompt"].to_list(),
+            answers={ans: test_df[ans].to_list() for ans in "ABCDE"},
+            k=cfg.knn,
+            shorten_answer=cfg.answer_trick == "shorten",
         )
     else:
         assert False, f"Impossible case: {cfg.answer_trick}"
 
+    # tidy up train_df a bit, and drop is_science
+    train_df = train_df[["prompt", "A", "B", "C", "D", "E", "answer", "context"]]
+    train_ds = Dataset.from_pandas(train_df)
+    val_ds = Dataset.from_pandas(val_df)
+    test_ds = Dataset.from_pandas(test_df)
     return train_ds, val_ds, test_ds
 
 
@@ -201,7 +193,10 @@ def main(cfg: Namespace):
     _ttrick = "ttrick" if cfg.title_trick else "nottrick"
     _atrick = cfg.answer_trick
     _knn = f"knn{cfg.knn}"
-    temp_folder = Path(f"input/llmse-finetune-mc/{_sci}_{_ttrick}_{_atrick}_{_knn}")
+    _replace = "replace" if cfg.replace_ctx else "keep"
+    temp_folder = Path(
+        f"input/llmse-finetune-mc/{_sci}_{_replace}_{_ttrick}_{_atrick}_{_knn}"
+    )
 
     # load and cache data
     if cfg.quick_run:
@@ -392,6 +387,7 @@ if __name__ == "__main__":
     parser.add_argument("--freeze_layers", type=int)
     parser.add_argument("--science_only", action="store_true")
     parser.add_argument("--title_trick", action="store_true")
+    parser.add_argument("--replace_ctx", action="store_true")
     # enable this flag for fast run and disable wandb
     parser.add_argument("--quick_run", action="store_true")
     cfg = parser.parse_args()
