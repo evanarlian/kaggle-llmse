@@ -133,6 +133,9 @@ class Searcher:
         k: int,
         shorten_answer: bool,
     ):
+        assert all(
+            len(questions) == len(answer) for answer in answers.values()
+        ), "questions and answers differ in length"
         # flatten questions + answers to a single list
         combined = []
         for i, ques in enumerate(questions):
