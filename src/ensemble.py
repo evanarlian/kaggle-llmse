@@ -40,9 +40,6 @@ def load_test() -> Dataset:
             shorten_answer=False,
         ),
     )
-    # # TODO delete unused
-    # del searcher, bi_encoder, index_gpu, res, index
-    # torch.cuda.empty_cache()
     return test_ds
 
 
@@ -78,65 +75,6 @@ def make_answer(logits: np.ndarray) -> list[str]:
     choices = np.array(["A", "B", "C", "D", "E"])
     top3_choices = choices[preds]
     return [" ".join(row) for row in top3_choices]
-
-
-# @dataclass
-# class DataCollatorForMultipleChoice:
-#     """Data collator that will dynamically pad the inputs for multiple choice"""
-
-#     tokenizer: PreTrainedTokenizerBase
-
-#     def __call__(self, batch):
-#         # labels do not play well with the rest, do this first
-#         labels = torch.tensor([row.pop("labels") for row in batch])
-#         # flatten: batch has multiple rows, each row's key-value has 5 choices
-#         batch = {
-#             k: [choice for row in batch for choice in row[k]] for k in batch[0].keys()
-#         }
-#         batch = self.tokenizer.pad(batch, return_tensors="pt")
-#         batch = {k: v.view(-1, 5, v.size(-1)) for k, v in batch.items()}
-#         batch["labels"] = labels
-#         return batch
-
-
-# def pretokenize(row: dict, tokenizer: PreTrainedTokenizerBase):
-#     """Convert single row of data to 5 multiple choices and a label"""
-#     first_sentences = [row["context"]] * 5
-#     second_sentences = [f"{row['prompt']} {row[ans]}" for ans in "ABCDE"]
-#     encoded = tokenizer(first_sentences, second_sentences, truncation="only_first")
-#     label2id = {"A": 0, "B": 1, "C": 2, "D": 3, "E": 4}
-#     encoded["labels"] = label2id[row["answer"]]
-#     return encoded
-
-
-# def predict_from_finetuned(test_ds: Dataset) -> Tensor:
-#     pretrained = "input/llmse-finetune-mc/nosci_keep_ttrick_standard_knn16/finished/deberta-v3-large-tasksource-nli"
-#     model = DebertaV2ForMultipleChoice.from_pretrained(pretrained)
-#     model.cuda().eval()
-#     tokenizer = DebertaV2Tokenizer.from_pretrained(pretrained, model_max_length=512)
-
-#     unused = ["prompt", "A", "B", "C", "D", "E", "context"]
-#     test_ds = test_ds.map(
-#         lambda row: pretokenize(row, tokenizer), remove_columns=unused, num_proc=6
-#     )
-
-#     test_loader = DataLoader(
-#         test_ds,
-#         batch_size=4,
-#         shuffle=False,
-#         num_workers=1,
-#         drop_last=False,
-#         collate_fn=DataCollatorForMultipleChoice(tokenizer=tokenizer),
-#     )
-
-#     logits = []
-#     for batch in tqdm(test_loader):
-#         batch = {k: v.cuda() for k, v in batch.items()}
-#         with torch.no_grad():
-#             logits = model(**batch)["logits"]  # (5, 3) [positive, netral, negative]
-#         probs = logits.softmax(-1)
-#         positives.append(probs[:, 0].cpu())
-#     return torch.stack(positives)
 
 
 def main():
