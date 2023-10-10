@@ -4,6 +4,7 @@ import faiss
 import numpy as np
 import pandas as pd
 import torch
+from torch import Tensor
 from datasets import Dataset, load_from_disk
 from sentence_transformers import SentenceTransformer
 from tqdm.auto import tqdm
@@ -43,7 +44,7 @@ def load_test() -> Dataset:
     return test_ds
 
 
-def predict(pretrained: str, test_ds: Dataset, num_labels: int) -> np.ndarray:
+def predict(pretrained: str, test_ds: Dataset, num_labels: int) -> Tensor:
     model = DebertaV2ForSequenceClassification.from_pretrained(
         pretrained, num_labels=num_labels
     )
@@ -67,7 +68,7 @@ def predict(pretrained: str, test_ds: Dataset, num_labels: int) -> np.ndarray:
             # for mult choice, logits is (5, 1)
             logits = model(**encoded)["logits"]
         logits_list.append(logits[:, 0].cpu())  # pick first column regardless of task
-    return torch.stack(logits_list).numpy()
+    return torch.stack(logits_list)
 
 
 def make_answer(logits: np.ndarray) -> list[str]:
@@ -85,8 +86,13 @@ def main():
         test_ds,
         num_labels=1,
     )
-    logits_avg = (logits1 + logits2) / 2
-    preds = make_answer(logits_avg)
+
+    USE_PROBS = False
+    if USE_PROBS:
+        ensemble_avg = (logits1.softmax(-1) + logits2.softmax(-1)) / 2
+    else:
+        ensemble_avg = (logits1 + logits2) / 2
+    preds = make_answer(ensemble_avg.numpy())
     sub_df = pd.read_csv("input/kaggle-llm-science-exam/sample_submission.csv")
     sub_df["prediction"] = preds
     Path("input/llmse-ensemble/").mkdir(parents=True, exist_ok=True)
