@@ -123,6 +123,7 @@ def load_all_data(cfg: Namespace) -> tuple[Dataset, Dataset, Dataset]:
     if cfg.answer_trick == "no":
         print("Adding contexts just from questions")
         if cfg.replace_ctx:
+            # BUG? pandas .loc will consume a lot of memory, crashing kaggle kernel
             train_df.loc[sci, "context"] = searcher.search_only(
                 train_df.loc[sci, "prompt"].to_list(), k=cfg.knn
             )

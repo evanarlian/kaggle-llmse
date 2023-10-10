@@ -20,6 +20,7 @@
     # parser.add_argument("--freeze_layers", type=int)
     # parser.add_argument("--science_only", action="store_true")
     # parser.add_argument("--title_trick", action="store_true")
+    # parser.add_argument("--replace_ctx", action="store_true")
     # # enable this flag for fast run and disable wandb
     # parser.add_argument("--quick_run", action="store_true")
 
@@ -90,3 +91,8 @@
 # # it's longformering time
 # python src/finetune_mc.py --pretrained=potsawee/longformer-large-4096-answering-race --science_only --title_trick --max_tokens=512 --knn=16 --ep=0.5 --lr=2e-5 --bs=8 --grad_acc=4 --freeze_layers=12 --answer_trick=shorten
 # python src/finetune_mc.py --pretrained=potsawee/longformer-large-4096-answering-race --science_only --title_trick --max_tokens=512 --knn=16 --ep=0.5 --lr=2e-5 --bs=8 --grad_acc=1 --freeze_layers=12 --answer_trick=shorten
+
+# # now mix in non science too
+# python src/finetune_mc.py --pretrained=sileod/deberta-v3-large-tasksource-nli  --title_trick --max_tokens=384 --knn=16 --ep=0.3 --lr=8e-6 --bs=8 --grad_acc=4 --freeze_layers=16 --answer_trick=standard --replace_ctx
+# python src/finetune_mc.py --pretrained=sileod/deberta-v3-large-tasksource-nli  --title_trick --max_tokens=384 --knn=16 --ep=0.3 --lr=8e-6 --bs=8 --grad_acc=4 --freeze_layers=16 --answer_trick=standard
+# python src/finetune_mc.py --pretrained=sileod/deberta-v3-large-tasksource-nli  --title_trick --max_tokens=384 --knn=16 --ep=1 --lr=8e-6 --bs=8 --grad_acc=4 --freeze_layers=16 --answer_trick=standard --replace_ctx
